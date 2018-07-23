@@ -106,11 +106,16 @@ def getStartCluster(drawnArms, cloud, figsize=[512, 512], fullOutput=False):
             cloud[:, 1] == coord[1]
         )
     )
-    startPoints = np.array([i[0] for i in drawnArms if coordInCloud(i[0])])
+    startPoints = np.array([
+        [j for j in i if coordInCloud(j)][0]
+        for i in drawnArms if coordInCloud(i[0])
+    ])
     endPoints = np.array([i[-1] for i in drawnArms if coordInCloud(i[-1])])
+    print(startPoints.shape, endPoints.shape)
     startEndPoints = np.concatenate((startPoints, endPoints))
+    print(startEndPoints)
 
-    db_startEndPoints = DBSCAN(eps=15, min_samples=3, n_jobs=-1)
+    db_startEndPoints = DBSCAN(eps=50, min_samples=2, n_jobs=-1)
     db_startEndPoints.fit(startEndPoints)
 
     means = np.array([
@@ -120,7 +125,9 @@ def getStartCluster(drawnArms, cloud, figsize=[512, 512], fullOutput=False):
         )
         for l in range(np.max(db_startEndPoints.labels_))
     ])
-
+    if len(means) == 0:
+        print('ERROR: no start cluster found')
+        return np.array([])
     centralGroupLabel = np.argmin(
         np.add.reduce(
             (means - [figsize[0] / 2, figsize[0] / 2])**2,
@@ -137,12 +144,15 @@ def getStartCluster(drawnArms, cloud, figsize=[512, 512], fullOutput=False):
 
 
 def findDownstreamCluster(startEndPoints):
-    db_downStreamPoints = DBSCAN(eps=15, min_samples=3, n_jobs=-1)
+    db_downStreamPoints = DBSCAN(eps=15, min_samples=2, n_jobs=-1)
     db_downStreamPoints.fit(startEndPoints)
     clusterSizes = [
         sum(1 for i in db_downStreamPoints.labels_ == clusterLabel if i)
         for clusterLabel in range(max(db_downStreamPoints.labels_ + 1))
     ]
+    if len(clusterSizes) == 0:
+        print('ERROR: no downstream cluster found')
+        return np.zeros(startEndPoints.shape[0], dtype=bool)
     mask = db_downStreamPoints.labels_ == np.argmax(clusterSizes)
     return mask
 
@@ -206,7 +216,6 @@ def fitParametrisedSpline(points):
     Sx = UnivariateSpline(t, points[:, 0], s=0.25, k=5)
     Sy = UnivariateSpline(t, points[:, 1], s=0.25, k=5)
     return Sx, Sy
-
 
 
 if __name__ == '__main__':
