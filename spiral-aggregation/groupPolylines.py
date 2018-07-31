@@ -5,6 +5,11 @@ from sklearn.neighbors import LocalOutlierFactor
 np.random.seed(299792458)
 
 
+# Consider the line extending the segment, parameterized as v + t (w - v).
+# We find projection of point p onto the line.
+# It falls where t = [(p-v) . (w-v)] / |w-v|^2
+# We clamp t from [0,1] to handle points outside the segment vw.
+
 # calculate dot(a) of a(n,2), b(n,2): np.add.reduce(b1 * b2, axis=1)
 # calucalte norm(a) of a(n,2), b(n,2): np.add.reduce((a-b)**2, axis=1)
 def calcT(a):
@@ -74,18 +79,19 @@ def clusterPolyLines(polyLines):
     # Obtain clustering results
     core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
     core_samples_mask[db.core_sample_indices_] = True
-    armLabels = db.labels_
 
     # Number of clusters in labels, ignoring noise if present.
-    n_clusters_ = len(set(armLabels)) - (1 if -1 in armLabels else 0)
+    n_clusters_ = len(set(db.labels_)) - (1 if -1 in db.labels_ else 0)
 
     print('Estimated number of clusters: %d' % n_clusters_)
-    return db.labels_
+    return db
 
 
-def identifyOutliers(cloud):
+def identifyOutliers(cloud, returnClf=False):
     clf = LocalOutlierFactor(n_neighbors=50)
     y_pred = clf.fit_predict(cloud)
     mask = ((y_pred + 1) / 2).astype(bool)
     cleanedCloud = cloud[mask]
-    return cleanedCloud, mask
+    if returnClf:
+        return clf
+    return cleanedCloud, mask, clf

@@ -112,7 +112,11 @@ def getStartCluster(drawnArms, cloud, figsize=[512, 512], fullOutput=False):
     ])
     endPoints = np.array([i[-1] for i in drawnArms if coordInCloud(i[-1])])
     print(startPoints.shape, endPoints.shape)
-    startEndPoints = np.concatenate((startPoints, endPoints))
+    try:
+        startEndPoints = np.concatenate((startPoints, endPoints))
+    except ValueError as e:
+        print(e)
+        return False
     print(startEndPoints)
 
     db_startEndPoints = DBSCAN(eps=50, min_samples=2, n_jobs=-1)
