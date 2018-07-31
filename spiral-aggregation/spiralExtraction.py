@@ -19,6 +19,19 @@ def xyFromRTheta(r, theta, mux=0, muy=0):
     return mux + r * np.cos(theta), muy + r * np.sin(theta)
 
 
+wrapColor = lambda color, s: '{}{}\033[0m'.format(color, s)
+red = lambda s: wrapColor('\033[31m', s)
+green = lambda s: wrapColor('\033[32m', s)
+yellow = lambda s: wrapColor('\033[33m', s)
+blue = lambda s: wrapColor('\033[34m', s)
+purple = lambda s: wrapColor('\033[35m', s)
+
+
+def log(s, flag=True):
+    if flag:
+        print(s)
+
+
 # -------------------- SECTION: Polygon distance algorithm --------------------
 # calculate dot(a) of a(n,2), b(n,2): np.add.reduce(b1 * b2, axis=1)
 # calucalte norm(a) of a(n,2), b(n,2): np.add.reduce((a-b)**2, axis=1)
@@ -168,11 +181,11 @@ def fitSmoothedSpline(points, imageSize=512):
 
 
 # ------------------------ SECTION: Complete Algorithm ------------------------
-def fit(drawnArms, imageSize=512):
-    print('Calculating distance matrix (this can be slow)')
+def fit(drawnArms, imageSize=512, verbose=True):
+    log('Calculating distance matrix (this can be slow)', verbose)
     functions = []
     distances = calculateDistanceMatrix(drawnArms)
-    print('Clustering arms')
+    log('Clustering arms', verbose)
     db = DBSCAN(
         eps=20,
         min_samples=3,
@@ -184,33 +197,29 @@ def fit(drawnArms, imageSize=512):
     for label in np.unique(db.labels_):
         if label < 0:
             continue
-        print('Working on arm label {}'.format(label))
+        log('Working on arm label {}'.format(label), verbose)
         pointCloud = np.array([
             point for arm in drawnArms[db.labels_ == label]
             for point in arm
         ])
-
-        print('\t[1 / 4] Cleaning points ({} total)'.format(
-            pointCloud.shape[0]
-        ))
+        log(
+            '\t[1 / 4] Cleaning points ({} total)'.format(pointCloud.shape[0]),
+            verbose
+        )
         clf, mask = cleanPoints(pointCloud)
-
         cleanedCloud = pointCloud[mask]
-
-        print('\t[2 / 4] Identifiying most representitive arm')
-        armyArm = findArmyArm(drawnArms, clf)
-
-        print('\t[3 / 4] Sorting points')
+        log('\t[2 / 4] Identifiying most representitive arm', verbose)
+        armyArm = findArmyArm(drawnArms[db.labels_ == label], clf)
+        log('\t[3 / 4] Sorting points', verbose)
         deviationCloud = np.transpose(
             getDistAlongPolyline(cleanedCloud, armyArm)
         )
-
         pointOrder = np.argsort(deviationCloud[:, 0])
-        print('\t[4 / 4] Fitting Spline')
+        log('\t[4 / 4] Fitting Spline', verbose)
         Sx, Sy = fitSmoothedSpline(
             cleanedCloud[pointOrder],
             imageSize=imageSize
         )
         functions.append([Sx, Sy])
-    print('done!')
+    log('done!', verbose)
     return functions
