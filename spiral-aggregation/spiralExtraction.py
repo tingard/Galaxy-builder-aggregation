@@ -110,12 +110,14 @@ def cleanPoints(pointCloud):
 
 
 # -------------------------- SECTION: Point ordering --------------------------
-def findArmyArm(arms, clf):
+def findArmyArm(arms, clf, smooth=True):
     i = np.argmax([
         np.sum(clf._decision_function(arm[:10])) / arm.shape[0]
         for arm in arms
     ])
     arm = arms[i]
+    if not smooth:
+        return arm
 
     t = np.linspace(0, 1, arm.shape[0])
 

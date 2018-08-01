@@ -94,4 +94,4 @@ def identifyOutliers(cloud, returnClf=False):
     cleanedCloud = cloud[mask]
     if returnClf:
         return clf
-    return cleanedCloud, mask, clf
+    return cleanedCloud, mask
