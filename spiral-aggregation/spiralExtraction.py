@@ -2,9 +2,13 @@ import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import LocalOutlierFactor
 from scipy.interpolate import UnivariateSpline
-
+from shapely.geometry import LineString
 
 np.random.seed(299792458)
+
+null = None
+true = True
+false = False
 
 
 # ------------------------- SECTION: Helper functions -------------------------
@@ -32,7 +36,49 @@ def log(s, flag=True):
         print(s)
 
 
+def getDrawnArms(id, classifications):
+    annotationsForSubject = [
+        eval(foo) for foo in
+        classifications[classifications['subject_ids'] == id]['annotations']
+    ]
+    try:
+        annotationsWithSpiral = [
+            c[3]['value'][0]['value']
+            for c in annotationsForSubject
+            if len(c) > 3 and len(c[3]['value'][0]['value'])
+        ]
+    except IndexError as e:
+        print('{} raised {}'.format(id, e))
+        assert False
+    spirals = [[a['points'] for a in c] for c in annotationsWithSpiral]
+    spiralsWithLengthCut = [
+        [[[p['x'], p['y']] for p in a] for a in c]
+        for c in spirals if all([len(a) > 5 for a in c])
+    ]
+    drawnArms = np.array([
+        np.array(arm) for classification in spiralsWithLengthCut
+        for arm in classification
+        if LineString(arm).is_simple
+    ])
+    return drawnArms
+
+
+# --------------------------- SECTION: Deprojection ---------------------------
+def deprojectArm(phi, ba, arm):
+    p = np.deg2rad(phi)
+    Xs = (1 / ba) * (arm[:, 0] * np.cos(p) - arm[:, 1] * np.sin(p))
+    Ys = 1 * (arm[:, 0] * np.sin(p) + arm[:, 1] * np.cos(p))
+
+    return np.stack((Xs, Ys), axis=1)
+
+
 # -------------------- SECTION: Polygon distance algorithm --------------------
+# function to get distance from a point (y) to a line connected by two vertices
+# (p1, p2) from stackoverflow.com/questions/849211/
+# Consider the line extending the segment, parameterized as v + t (w - v).
+# We find projection of point p onto the line.
+# It falls where t = [(p-v) . (w-v)] / |w-v|^2
+
 # calculate dot(a) of a(n,2), b(n,2): np.add.reduce(b1 * b2, axis=1)
 # calucalte norm(a) of a(n,2), b(n,2): np.add.reduce((a-b)**2, axis=1)
 def calcT(a):
@@ -40,18 +86,27 @@ def calcT(a):
     b2 = a[:, 2, :] - a[:, 1, :]
     dots = np.add.reduce(b1 * b2, axis=1)
     l2 = np.add.reduce((a[:, 1] - a[:, 2])**2, axis=1)
-    out = np.clip(dots / l2, 0, 1)
-    return out
+    return np.clip(dots / l2, 0, 1)
 
 
 def getDiff(t, a):
     projection = a[:, 1, :] + np.repeat(
         t.reshape(-1, 1), 2, axis=1) * (a[:, 2, :] - a[:, 1, :])
+    outsideBounds = np.logical_or(t < 0, t > 1)
     out = np.add.reduce(
         (a[:, 0, :] - projection) * (a[:, 0, :] - projection),
         axis=1
     )
-    return np.sqrt(np.min(out))
+    endPointDistance = np.amin([
+        np.add.reduce((a[outsideBounds, 1] - a[outsideBounds, 0])**2, axis=1),
+        np.add.reduce((a[outsideBounds, 2] - a[outsideBounds, 0])**2, axis=1)
+    ], axis=0)
+    # If we have gone beyond endpoints, set distance to be the distance to the
+    # end point (rather than to a continuation of the line)
+    out[outsideBounds] = endPointDistance
+    return np.min(out)
+    # Testing to see if penalising long distances more helps improve arm detection
+    # return np.sqrt(np.min(out))
 
 
 vCalcT = np.vectorize(calcT, signature='(a,b,c)->(a)')
@@ -59,7 +114,12 @@ vGetDiff = np.vectorize(getDiff, signature='(a),(a,b,c)->()')
 
 
 def minimum_distance(a, b):
-    # construct our tensor (allowing quick calculation)
+    # construct our tensor (allowing vectorization)
+    # m{i, j, k, p}
+    # i iterates over each point in a
+    # j cycles through each pair of points in b
+    # k cycles through (a[i], b[j], b[j+1])
+    # p each of which has [x, y]
     m = np.zeros((a.shape[0], b.shape[0] - 1, 3, 2))
     m[:, :, 0, :] = np.transpose(
         np.tile(a, [m.shape[1] + 1, 1, 1]),
@@ -69,6 +129,7 @@ def minimum_distance(a, b):
     m[:, :, 2, :] = np.tile(
         np.roll(b, -1, axis=0), [a.shape[0], 1, 1]
     )[:, :-1, :]
+    # t[i, j] = ((a[i] - b[j]) . (b[j + 1] - b[j])) / (b[j + 1] - b[j]|**2
     t = vCalcT(np.array(m))
     return np.sum(vGetDiff(t, m)) / a.shape[0]
 
@@ -112,7 +173,7 @@ def cleanPoints(pointCloud):
 # -------------------------- SECTION: Point ordering --------------------------
 def findArmyArm(arms, clf, smooth=True):
     i = np.argmax([
-        np.sum(clf._decision_function(arm[:10])) / arm.shape[0]
+        np.sum(clf._decision_function(arm)) / arm.shape[0]
         for arm in arms
     ])
     arm = arms[i]
@@ -134,16 +195,26 @@ def sign(a):
     b2 = a[:, 2, :] - a[:, 1, :]
     paddedB1 = np.pad(b1, ((0, 0), (0, 1)), 'constant', constant_values=(0,))
     paddedB2 = np.pad(b2, ((0, 0), (0, 1)), 'constant', constant_values=(0,))
-    return np.sign(np.cross(paddedB1, paddedB2, axisa=1, axisb=1))[:, 2]
+    s = np.sign(np.cross(paddedB1, paddedB2, axisa=1, axisb=1))[:, 2]
+    s[s == 0] = 1.0
+    return s
 
 
 def getDiff2(t, a):
     projection = a[:, 1, :] + np.repeat(
         t.reshape(-1, 1), 2, axis=1) * (a[:, 2, :] - a[:, 1, :])
+    outsideBounds = np.logical_or(t < 0, t > 1)
     out = np.add.reduce(
         (a[:, 0, :] - projection) * (a[:, 0, :] - projection),
         axis=1
     )
+    endPointDistance = np.amin([
+        np.add.reduce((a[outsideBounds, 1] - a[outsideBounds, 0])**2, axis=1),
+        np.add.reduce((a[outsideBounds, 2] - a[outsideBounds, 0])**2, axis=1)
+    ], axis=0)
+    # If we have gone beyond endpoints, set distance to be the distance to the
+    # end point (rather than to a continuation of the line)
+    out[outsideBounds] = endPointDistance
     return np.sqrt(out)
 
 
@@ -152,7 +223,12 @@ vSign = np.vectorize(sign, signature='(a,b,c)->(a)')
 
 
 def getDistAlongPolyline(points, polyLine):
-    # construct the tensor
+    # construct our tensor (allowing vectorization)
+    # m{i, j, k, p}
+    # i iterates over each point in a
+    # j cycles through each pair of points in b
+    # k cycles through (a[i], b[j], b[j+1])
+    # p represents [x, y]
     m = np.zeros((points.shape[0], polyLine.shape[0] - 1, 3, 2))
     m[:, :, 0, :] = np.transpose(
         np.tile(points, [m.shape[1] + 1, 1, 1]), axes=[1, 0, 2]
@@ -162,35 +238,42 @@ def getDistAlongPolyline(points, polyLine):
         np.roll(polyLine, -1, axis=0), [points.shape[0], 1, 1]
     )[:, :-1, :]
 
-    t = vCalcT(np.array(m))
-    signs = vSign(np.array(m))
+    t = vCalcT(m)
+    signs = vSign(m)
     distances = vGetDiff2(t, m)
     minDistIndex = np.argmin(distances, axis=1)
-    asd = np.dstack((np.arange(minDistIndex.shape[0]), minDistIndex))[0]
+    optimumIndex = np.dstack(
+        (np.arange(minDistIndex.shape[0]), minDistIndex)
+    )[0]
     return (
-        minDistIndex + t[asd[:, 0], asd[:, 1]],
-        distances[asd[:, 0], asd[:, 1]] * signs[asd[:, 0], asd[:, 1]]
+        minDistIndex + t[optimumIndex[:, 0], optimumIndex[:, 1]],
+        (
+            distances[optimumIndex[:, 0], optimumIndex[:, 1]]
+            * signs[optimumIndex[:, 0], optimumIndex[:, 1]]
+        )
     )
 
 
 # ------------------------- SECTION: Final spline fit -------------------------
-def fitSmoothedSpline(points, imageSize=512):
-    _points = points / imageSize - 0.5
+def fitSmoothedSpline(points):
     t = np.linspace(0, 1, points.shape[0])
-    Sx = UnivariateSpline(t, _points[:, 0], s=0.25, k=5)
-    Sy = UnivariateSpline(t, _points[:, 1], s=0.25, k=5)
+    Sx = UnivariateSpline(t, points[:, 0], k=5)#, s=0.25)
+    Sy = UnivariateSpline(t, points[:, 1], k=5)#, s=0.25)
     return (Sx, Sy)
 
 
 # ------------------------ SECTION: Complete Algorithm ------------------------
-def fit(drawnArms, imageSize=512, verbose=True):
+def fit(
+    drawnArms, imageSize=512, verbose=True, fullOutput=True, phi=0, ba=1
+):
     log('Calculating distance matrix (this can be slow)', verbose)
     functions = []
+    clfs = []
     distances = calculateDistanceMatrix(drawnArms)
     log('Clustering arms', verbose)
     db = DBSCAN(
-        eps=20,
-        min_samples=3,
+        eps=400,
+        min_samples=5,
         metric='precomputed',
         n_jobs=-1,
         algorithm='brute'
@@ -209,6 +292,7 @@ def fit(drawnArms, imageSize=512, verbose=True):
             verbose
         )
         clf, mask = cleanPoints(pointCloud)
+        clfs.append(clf)
         cleanedCloud = pointCloud[mask]
         log('\t[2 / 4] Identifiying most representitive arm', verbose)
         armyArm = findArmyArm(drawnArms[db.labels_ == label], clf)
@@ -216,12 +300,33 @@ def fit(drawnArms, imageSize=512, verbose=True):
         deviationCloud = np.transpose(
             getDistAlongPolyline(cleanedCloud, armyArm)
         )
-        pointOrder = np.argsort(deviationCloud[:, 0])
+
+        deviationEnvelope = np.abs(deviationCloud[:, 1]) < 30
+        startEndMask = np.logical_and(
+            deviationCloud[:, 0] > 0,
+            deviationCloud[:, 0] < armyArm.shape[0]
+        )
+
+        totalMask = np.logical_and(deviationEnvelope, startEndMask)
+
+        pointOrder = np.argsort(deviationCloud[totalMask, 0])
+
+        normalisedPoints = cleanedCloud[totalMask][pointOrder] / imageSize
+        normalisedPoints -= 0.5
+
         log('\t[4 / 4] Fitting Spline', verbose)
         Sx, Sy = fitSmoothedSpline(
-            cleanedCloud[pointOrder],
-            imageSize=imageSize
+            normalisedPoints
         )
         functions.append([Sx, Sy])
     log('done!', verbose)
-    return functions
+    if not fullOutput:
+        return functions
+
+    returns = {
+        'functions': functions,
+        'distances': distances,
+        'LOF': clfs,
+        'labels': db.labels_
+    }
+    return returns
