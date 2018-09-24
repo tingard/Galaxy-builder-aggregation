@@ -11,12 +11,14 @@
 #     6. Fit a smoothing spline to ordered points
 # 3. Calculate pitch angles for the resulting spline fits
 
+print('Doing imports...')
 import os
 from tempfile import NamedTemporaryFile
 import numpy as np
 import pandas as pd
 import requests
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgb
 from matplotlib.patches import Ellipse
 from PIL import Image
 from astropy.io import fits
@@ -31,6 +33,7 @@ from gzbuilderspirals.galaxySpirals import GalaxySpirals
 import sdssCutoutGrab as scg
 import createSubjectsFunctions as csf
 
+print('Loading NSA catalog and Zooniverse data dump')
 # Open the NSA catalog, and the galaxy builder subjects and classifications
 nsa = fits.open('../../subjectUpload/nsa_v1_0_1.fits')
 
@@ -50,6 +53,15 @@ subjects = pd.read_csv('../classifications/galaxy-builder-subjects_24-7-18.csv')
 null = None
 true = True
 false = False
+
+# Some galaxies were montaged when created. Create a list of their coordinates for use later
+montages = [f for f in os.listdir('montageOutputs') if not f[0] == '.']
+montageCoordinates = np.array([
+    [float(j) for j in i.replace('+', ' ').split(' ')]
+    if '+' in i
+    else [float(j) for j in i.replace('-', ' -').split(' ')]
+    for i in [f for f in os.listdir('montageOutputs') if not f[0] == '.']
+])
 
 def main(id):
     print('Working on galaxy {}'.format(id))
@@ -73,11 +85,31 @@ def main(id):
     # First, use a WCS object to obtain the rotation in pixel coordinates, as
     # would be obtained from `fitsFile[0].data`
 
-    fitsname = dpj.getFitsName(gal)
+    montagesDistanceMask = np.add.reduce(
+        (montageCoordinates - [gal['RA'].iloc[0], gal['DEC'].iloc[0]])**2,
+        axis=1
+    ) < 0.01
+
+    if np.any(montagesDistanceMask):
+        montageFolder = montages[
+            np.where(montagesDistanceMask)[0][0]
+        ]
+        fitsName = '{}/{}/{}'.format(
+            os.path.abspath('montageOutputs'),
+            montageFolder,
+            'mosaic.fits'
+        )
+        print('\t- USING MONTAGED IMAGE')
+    else:
+        fitsName = 'fitsImages/{0}/{1}/frame-r-{0:06d}-{1}-{2:04d}.fits'.format(
+            int(gal['RUN']),
+            int(gal['CAMCOL']),
+            int(gal['FIELD'])
+        )
 
     print('\t- Getting galaxy rotation')
     w = dpj.createWCSObject(gal, 512)
-    angle = dpj.getAngle(gal, w, np.array([512, 512]))
+    wcsAngle = dpj.getAngle(gal, w, np.array([512, 512]))
 
     # We'll now download the Zooniverse image that volunteers actually classified on
 
@@ -95,7 +127,7 @@ def main(id):
 
     # Next, re-create an image (including masking and cutouts) from the FITS file
     fitsImageTmp = NamedTemporaryFile(suffix='.{}'.format(url.split('.')[-1]), delete=False)
-    fitsFile = fits.open(fitsname)
+    fitsFile = fits.open(fitsName)
 
     r = float(gal['PETRO_THETA'])/3600
     imageData = scg.cutFits(
@@ -104,9 +136,14 @@ def main(id):
         size=(4 * r * u.degree, 4 * r * u.degree)
     )
 
+    try:
+        background = fitsFile[2].data[0][0]
+    except IndexError:
+        # mosaiced images don't have the background, pass a blank array
+        background = None
     objects, segmentation_map = csf.sourceExtractImage(
         imageData,
-        fitsFile[2].data[0][0]
+        background
     )
 
     # create a true/false masking array
@@ -149,22 +186,23 @@ def main(id):
     except ValueError:
         best = 2
 
+
     # Using this knowledge, transform the angle to (hopefully) work in our
     # Zooniverse image frame
+    if best == 0:
+        angle = 90 - wcsAngle
     if best == 1:
-        angle = 90 - angle
+        angle = 90 + wcsAngle
     if best == 2:
-        angle = angle - 90
+        angle = wcsAngle - 90
 
+    print('angle: {}'.format(angle))
     # Now deproject the image of the galaxy:
     rotatedImage = rotate(picArray, -angle)
-    rotatedImage.shape
-    stretchedImage = rescale(rotatedImage, (1, 1/gal['SERSIC_BA'].iloc[0]))
-
-    n = int((stretchedImage.shape[1] - np.array(pic).shape[1]) / 2)
-
+    stretchedImage = rescale(rotatedImage, (1/gal['SERSIC_BA'].iloc[0], 1))
+    n = int((stretchedImage.shape[0] - np.array(pic).shape[0]) / 2)
     if n > 0:
-        deprojectedImage = stretchedImage[:, n:-n]
+        deprojectedImage = stretchedImage[n:-n, :]
     else:
         deprojectedImage = stretchedImage.copy()
 
@@ -180,7 +218,12 @@ def main(id):
     s = GalaxySpirals(drawnArms, ba=gal['SERSIC_BA'].iloc[0], phi=angle)
 
     # Now calculate a the distance matrix for the drawn arms (this can be slow)
-    distances = s.calculateDistances()
+    try:
+        distances = np.load('distances/subject-{}.npy'.format(id))
+        print('\t- Using saved distances')
+    except OSError:
+        distances = s.calculateDistances()
+        np.save('distances/subject-{}.npy'.format(id), distances)
 
     # Perform the clustering (using the DBSCAN clustering algorithm)
     db = s.clusterLines(distances)
@@ -192,7 +235,7 @@ def main(id):
 
     # PLOTTING
     # Add a helper function to generate plots of the resulting arms
-    def prettyPlot(arm, ax=plt.gca(), **kwargs):
+    def prettyPlot(arm, c, ax=plt.gca(), **kwargs):
         ax.plot(
             *arm.T,
             c='k'.format(i), linewidth=4
@@ -204,8 +247,8 @@ def main(id):
             *arm.T,
             c='w', linewidth=2, alpha=0.5
         )
-
-    plt.figure(figsize=(10, 30), dpi=100)
+    plt.figure(figsize=(10, 30), dpi=200)
+    plt.subplots_adjust(wspace=0.1, hspace=0.1)
     ax_annot = plt.subplot2grid((6, 2), (0, 0), colspan=2, rowspan=2)
     ax_cluster = plt.subplot2grid((6, 2), (2, 0))
     ax_sorting = plt.subplot2grid((6, 2), (2, 1))
@@ -214,41 +257,102 @@ def main(id):
     ax_final = plt.subplot2grid((6, 2), (4, 0), colspan=2, rowspan=2)
 
     # panel 1: all drawn arms
+    ax_annot.imshow(picArray, cmap='gray', origin='lower')
     for arm in drawnArms:
-        ax_annot.plot(*arm.T, '.-', linewidth=0.5, markersize=1, alpha=0.8)
-    ax_annot.axis('equal')
+        ax_annot.plot(*arm.T, '.-', linewidth=1, markersize=2)
 
     # panel 2: clustered arms
-    for arm in s.arms:
+    ax_cluster.imshow(picArray, cmap='gray', origin='lower')
+    for i, arm in enumerate(s.arms):
+        ax_cluster.plot(
+            *arm.pointCloud.T,
+            '.', c='k',
+            markersize=1,
+            alpha=1,
+        )
+        ax_cluster.plot(
+            *arm.pointCloud.T,
+            '.', c='C{}'.format(i % 10),
+            markersize=1,
+            alpha=0.4,
+        )
         ax_cluster.plot(
             *arm.cleanedCloud.T,
-            '.',
-            markersize=1, alpha=0.8,
+            '.', c='C{}'.format(i % 10),
+            markersize=1,
+            alpha=0.8,
         )
-    ax_cluster.axis('equal')
+    plt.setp(ax_cluster.get_xticklabels(), visible=False)
 
     # panel 3: sorting lines
+    ax_sorting.imshow(picArray, cmap='gray', origin='lower')
     for fit in xyFits:
-        plt.plot(*fit.T)
+        ax_sorting.plot(*fit.T)
+    plt.setp(ax_sorting.get_xticklabels(), visible=False)
+    plt.setp(ax_sorting.get_yticklabels(), visible=False)
 
-    plt.imshow(deprojectedImage, cmap='gray', origin='lower')
+    ax_isophote.imshow(picArray, cmap='gray', origin='lower')
+    isophote = Ellipse(
+        xy=np.array(picArray.shape) / 2,
+        width=200 * gal['SERSIC_BA'],
+        height=200,
+        angle=90 - angle,
+        ec='w',
+        fc='none'
+    )
+    ax_isophote.add_artist(isophote)
+
+    ax_deproject.imshow(deprojectedImage, cmap='gray', origin='lower')
     for i, arm in enumerate(result['deprojectedArms']):
-        plt.plot(*arm.pointCloud.T, 'k.', markersize=2, alpha=1)
-        plt.plot(
+        ax_deproject.plot(*arm.pointCloud.T, 'k.', markersize=2, alpha=1)
+        ax_deproject.plot(
             *arm.pointCloud.T,
             '.', c='C{}'.format(i), markersize=2, alpha=0.3
         )
-        plt.plot(
+        ax_deproject.plot(
             *arm.cleanedCloud.T,
             '.', c='C{}'.format(i), markersize=2, alpha=1
         )
+    for i, arm in enumerate(result['deprojectedFit']):
+        prettyPlot(
+            arm,
+            ax=ax_deproject,
+            label='Arm {}'.format(i),
+            c='C{}'.format(i)
+        )
+    plt.setp(ax_deproject.get_yticklabels(), visible=False)
+
+    ax_final.imshow(deprojectedImage, cmap='gray', origin='lower')
+    for i, arm in enumerate(result['deprojectedArms']):
+        p = ax_final.plot(
+            *arm.cleanedCloud.T,
+            '.',
+            c='C{}'.format(i % 10),
+            markersize=3,
+            label='Cleaned points in arm {}'.format(i)
+        )
+        c = np.array(to_rgb(p[0].get_color()))*0.7
+        p = ax_final.plot(
+            *arm.pointCloud[np.logical_not(arm.outlierMask)].T,
+            '.',
+            c=c,
+            markersize=3,
+            alpha=1,
+            label='Outlier points removed from arm {}'.format(i)
+        )
 
     for i, arm in enumerate(result['radialFit']):
-        prettyPlot(s.arms[i].deNorm(arm), label='Arm {}'.format(i), c='C{}'.format(i)),
+        prettyPlot(
+            s.arms[i].deNorm(arm),
+            ax=ax_final,
+            label='Arm {}'.format(i),
+            c='C{}'.format(i)
+        )
+    ax_final.legend()
 
-    plt.axis('off')
-    plt.savefig('arm-fits/subject-{}.jpg'.format(subjectId))
+    plt.savefig('arm-fits/subject-{}.jpg'.format(id), bbox_inches='tight')
     plt.close()
+
 
 
 if __name__ == '__main__':
