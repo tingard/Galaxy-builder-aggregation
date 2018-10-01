@@ -1,0 +1,1 @@
+ds9 /Users/tlingard/PhD/galaxy-builder/data-aggregation/spiral-aggregation/montageOutputs/178.18099975585938+1.740768313407898/mosaic.fits -regions ./rotations/regions/20902008.reg
