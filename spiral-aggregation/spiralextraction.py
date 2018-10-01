@@ -89,8 +89,8 @@ def main(id):
         (montageCoordinates - [gal['RA'].iloc[0], gal['DEC'].iloc[0]])**2,
         axis=1
     ) < 0.01
-
-    if np.any(montagesDistanceMask):
+    usingMontage = np.any(montagesDistanceMask)
+    if usingMontage:
         montageFolder = montages[
             np.where(montagesDistanceMask)[0][0]
         ]
@@ -109,12 +109,9 @@ def main(id):
 
     print('\t- Getting galaxy rotation')
     w = dpj.createWCSObject(gal, 512)
-    wcsAngle = dpj.getAngle(gal, w, np.array([512, 512]))
+    angle = dpj.getAngle(gal, fitsName, np.array([512, 512]))
 
     # We'll now download the Zooniverse image that volunteers actually classified on
-
-    # In[11]:
-
     getUrl = lambda id: eval(subjects[subjects['subject_id'] == id]['locations'].iloc[0])['1']
     url = getUrl(subjectId)
     imgData = requests.get(url).content
@@ -125,81 +122,17 @@ def main(id):
     pic = Image.open(f.name)
     os.unlink(f.name)
 
-    # Next, re-create an image (including masking and cutouts) from the FITS file
-    fitsImageTmp = NamedTemporaryFile(suffix='.{}'.format(url.split('.')[-1]), delete=False)
-    fitsFile = fits.open(fitsName)
-
-    r = float(gal['PETRO_THETA'])/3600
-    imageData = scg.cutFits(
-        fitsFile,
-        float(gal['RA']), float(gal['DEC']),
-        size=(4 * r * u.degree, 4 * r * u.degree)
-    )
-
-    try:
-        background = fitsFile[2].data[0][0]
-    except IndexError:
-        # mosaiced images don't have the background, pass a blank array
-        background = None
-    objects, segmentation_map = csf.sourceExtractImage(
-        imageData,
-        background
-    )
-
-    # create a true/false masking array
-    mask = csf.maskArr(imageData, segmentation_map, objects[-1][0] + 1)
-
-    # create the masked image
-    maskedImageData = imageData[:]
-    maskedImageData[mask] = 0
-
-    # apply an asinh stretch
-    stretchedImageData = csf.stretchArray(maskedImageData[:, ::-1])
-
-    resizeTo = (512, 512)
-
-    im = csf.saveImage(
-        stretchedImageData,
-        fname=fitsImageTmp.name,
-        resize=True,
-        size=resizeTo
-    )
-    fitsImageTmp.close()
-    os.unlink(fitsImageTmp.name)
-
     # Grab the data arrays from the Image objects, and imshow the images (for debugging purposes)
     picArray = np.array(pic)
-    imArray = np.array(im)
 
-    # Trial some image transformations to see what needs to be done to get the
-    # angle in Zoo coordinates
-    picArray = picArray.astype(float)
-    t1 = imArray.astype(float)
-    t2 = imArray.T.astype(float)
-    t3 = imArray[:, ::-1].T.astype(float)
-    try:
-        ssim_vals = [
-            ssim(picArray**2, t**2, data_range=picArray.max()**2 - picArray.min()**2)
-            for t in [t1, t2, t3]
-        ]
-        best = np.argmax(ssim_vals)
-    except ValueError:
-        best = 2
-
-
-    # Using this knowledge, transform the angle to (hopefully) work in our
-    # Zooniverse image frame
-    if best == 0:
-        angle = 90 - wcsAngle
-    if best == 1:
-        angle = 90 + wcsAngle
-    if best == 2:
-        angle = wcsAngle - 90
-
-    print('angle: {}'.format(angle))
     # Now deproject the image of the galaxy:
-    rotatedImage = rotate(picArray, -angle)
-    stretchedImage = rescale(rotatedImage, (1/gal['SERSIC_BA'].iloc[0], 1))
+    rotatedImage = rotate(picArray, angle)
+    stretchedImage = rescale(
+        rotatedImage,
+        (1/gal['SERSIC_BA'].iloc[0], 1),
+        mode='constant',
+        multichannel=False
+    )
     n = int((stretchedImage.shape[0] - np.array(pic).shape[0]) / 2)
     if n > 0:
         deprojectedImage = stretchedImage[n:-n, :]
@@ -215,7 +148,7 @@ def main(id):
     # We'll make use of the `gzbuilderspirals` class method to cluster arms.
     # First, initialise a `GalaxySpirals` object with the arms and deprojection
     # parameters
-    s = GalaxySpirals(drawnArms, ba=gal['SERSIC_BA'].iloc[0], phi=angle)
+    s = GalaxySpirals(drawnArms, ba=gal['SERSIC_BA'].iloc[0], phi=-angle)
 
     # Now calculate a the distance matrix for the drawn arms (this can be slow)
     try:
@@ -296,7 +229,7 @@ def main(id):
         xy=np.array(picArray.shape) / 2,
         width=200 * gal['SERSIC_BA'],
         height=200,
-        angle=90 - angle,
+        angle=90 + angle,
         ec='w',
         fc='none'
     )
@@ -353,6 +286,58 @@ def main(id):
     plt.savefig('arm-fits/subject-{}.jpg'.format(id), bbox_inches='tight')
     plt.close()
 
+    # calculate pitch angles
+    print('\t- Creating pitch angle plot')
+    plt.figure(figsize=(14, 7))
+    # first panel is the galaxy, including start and end of arms
+    plt.subplot(121)
+    plt.imshow(deprojectedImage, cmap='gray', origin='lower')
+    for i, arm in enumerate(result['radialFit']):
+        prettyPlot(
+            s.arms[i].deNorm(arm),
+            ax=plt.gca(),
+            label='Arm {}'.format(i),
+            c='C{}'.format(i)
+        )
+    plt.plot(
+        *[deprojectedImage.shape[0] / 2] * 2,
+        'x',
+        markersize=10,
+        label='center'
+    )
+    plt.subplot(122)
+    getRadius = lambda c: np.sqrt(np.add.reduce(c**2, axis=1))
+
+    for i, arm in enumerate(result['radialFit']):
+        if getRadius(arm[0].reshape(1, 2)) > getRadius(arm[-1].reshape(1, 2)):
+            arm = arm[::-1]
+
+        pas = np.zeros(arm.shape[0] - 2)
+        O = np.array([0, 0])
+        for j in range(1, arm.shape[0] - 1):
+            pnm1 = arm[j - 1]
+            pn = arm[j]
+            pnp1 = arm[j + 1]
+            unitTangent = (pnp1 - pnm1) / np.linalg.norm(pnp1 - pnm1)
+
+            pas[j - 1] = np.rad2deg(
+                np.pi / 2 - np.arccos(
+                    np.dot(pn / np.linalg.norm(pn), unitTangent)
+                )
+            )
+        plt.plot(
+            getRadius(arm[1: -1]),
+            pas,
+            '-',
+            c='C{}'.format(i % 10),
+            label='Arm {}'.format(i)
+        )
+
+    plt.xlabel('Distance from center of galaxy (arbitrary units)')
+    plt.ylabel('Measured pitch angle (degrees)')
+    plt.legend()
+    plt.savefig('pitchAngles/subject-{}.jpg'.format(id), bbox_inches='tight')
+    plt.close()
 
 
 if __name__ == '__main__':
