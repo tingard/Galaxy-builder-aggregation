@@ -180,14 +180,12 @@ def main(id):
             *arm.T,
             c='w', linewidth=2, alpha=0.5
         )
-    plt.figure(figsize=(10, 30), dpi=200)
+    plt.figure(figsize=(27, 10), dpi=200)
     plt.subplots_adjust(wspace=0.1, hspace=0.1)
-    ax_annot = plt.subplot2grid((6, 2), (0, 0), colspan=2, rowspan=2)
-    ax_cluster = plt.subplot2grid((6, 2), (2, 0))
-    ax_sorting = plt.subplot2grid((6, 2), (2, 1))
-    ax_isophote = plt.subplot2grid((6, 2), (3, 0))
-    ax_deproject = plt.subplot2grid((6, 2), (3, 1))
-    ax_final = plt.subplot2grid((6, 2), (4, 0), colspan=2, rowspan=2)
+    ax_annot = plt.subplot2grid((2, 5), (0, 0), colspan=2, rowspan=2)
+    ax_cluster = plt.subplot2grid((2, 5), (0, 2))
+    ax_isophote = plt.subplot2grid((2, 5), (1, 2))
+    ax_final = plt.subplot2grid((2, 5), (0, 3), colspan=2, rowspan=2)
 
     # panel 1: all drawn arms
     ax_annot.imshow(picArray, cmap='gray', origin='lower')
@@ -197,33 +195,26 @@ def main(id):
     # panel 2: clustered arms
     ax_cluster.imshow(picArray, cmap='gray', origin='lower')
     for i, arm in enumerate(s.arms):
-        ax_cluster.plot(
-            *arm.pointCloud.T,
-            '.', c='k',
-            markersize=1,
-            alpha=1,
-        )
-        ax_cluster.plot(
-            *arm.pointCloud.T,
-            '.', c='C{}'.format(i % 10),
-            markersize=1,
-            alpha=0.4,
-        )
-        ax_cluster.plot(
+        p = ax_cluster.plot(
             *arm.cleanedCloud.T,
-            '.', c='C{}'.format(i % 10),
-            markersize=1,
-            alpha=0.8,
+            '.',
+            c='C{}'.format(i % 10),
+            markersize=2,
+            label='Cleaned points in arm {}'.format(i)
         )
+        c = np.array(to_rgb(p[0].get_color()))*0.7
+        p = ax_cluster.plot(
+            *arm.pointCloud[np.logical_not(arm.outlierMask)].T,
+            'x',
+            c=c,
+            markersize=3,
+            alpha=1,
+            label='Outlier points removed from arm {}'.format(i)
+        )
+
     plt.setp(ax_cluster.get_xticklabels(), visible=False)
 
-    # panel 3: sorting lines
-    ax_sorting.imshow(picArray, cmap='gray', origin='lower')
-    for fit in xyFits:
-        ax_sorting.plot(*fit.T)
-    plt.setp(ax_sorting.get_xticklabels(), visible=False)
-    plt.setp(ax_sorting.get_yticklabels(), visible=False)
-
+    # panel 3: NSA isophote
     ax_isophote.imshow(picArray, cmap='gray', origin='lower')
     isophote = Ellipse(
         xy=np.array(picArray.shape) / 2,
@@ -235,50 +226,33 @@ def main(id):
     )
     ax_isophote.add_artist(isophote)
 
-    ax_deproject.imshow(deprojectedImage, cmap='gray', origin='lower')
-    for i, arm in enumerate(result['deprojectedArms']):
-        ax_deproject.plot(*arm.pointCloud.T, 'k.', markersize=2, alpha=1)
-        ax_deproject.plot(
-            *arm.pointCloud.T,
-            '.', c='C{}'.format(i), markersize=2, alpha=0.3
-        )
-        ax_deproject.plot(
-            *arm.cleanedCloud.T,
-            '.', c='C{}'.format(i), markersize=2, alpha=1
-        )
-    for i, arm in enumerate(result['deprojectedFit']):
-        prettyPlot(
-            arm,
-            ax=ax_deproject,
-            label='Arm {}'.format(i),
-            c='C{}'.format(i)
-        )
-    plt.setp(ax_deproject.get_yticklabels(), visible=False)
-
+    # panel 3: Final splines
     ax_final.imshow(deprojectedImage, cmap='gray', origin='lower')
     for i, arm in enumerate(result['deprojectedArms']):
         p = ax_final.plot(
             *arm.cleanedCloud.T,
             '.',
             c='C{}'.format(i % 10),
-            markersize=3,
+            markersize=2,
             label='Cleaned points in arm {}'.format(i)
         )
         c = np.array(to_rgb(p[0].get_color()))*0.7
         p = ax_final.plot(
             *arm.pointCloud[np.logical_not(arm.outlierMask)].T,
-            '.',
+            'x',
             c=c,
-            markersize=3,
-            alpha=1,
-            label='Outlier points removed from arm {}'.format(i)
+            markersize=4,
+            label='Outlier points in arm {}'.format(i)
         )
 
     for i, arm in enumerate(result['radialFit']):
         prettyPlot(
             s.arms[i].deNorm(arm),
             ax=ax_final,
-            label='Arm {}'.format(i),
+            label='Arm {}. {} drawn poly-lines'.format(
+                i,
+                np.where(db.labels_ == i)[0].shape[0]
+            ),
             c='C{}'.format(i)
         )
     ax_final.legend()
