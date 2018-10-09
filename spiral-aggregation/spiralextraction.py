@@ -22,38 +22,22 @@ from matplotlib.colors import to_rgb
 from matplotlib.patches import Ellipse
 from PIL import Image
 from astropy.io import fits
-from scipy.ndimage.filters import gaussian_filter
-from skimage import img_as_float
 from skimage.transform import rotate, rescale
-from skimage.measure import compare_ssim as ssim
-import astropy.units as u
 from gzbuilderspirals import deprojecting as dpj
-from gzbuilderspirals import getDrawnArms, deprojectArm, rThetaFromXY, xyFromRTheta
+from gzbuilderspirals import getDrawnArms, rThetaFromXY, xyFromRTheta
 from gzbuilderspirals.galaxySpirals import GalaxySpirals
-import sdssCutoutGrab as scg
-import createSubjectsFunctions as csf
 
-print('Loading NSA catalog and Zooniverse data dump')
-# Open the NSA catalog, and the galaxy builder subjects and classifications
-nsa = fits.open('../../subjectUpload/nsa_v1_0_1.fits')
+print('Loading NSA catalog')
+df_nsa = pd.read_pickle('NSA_filtered.pkl')
 
-nsa_keys = [
-    'NSAID', 'ISDSS', 'INED', 'RA', 'DEC', 'Z', 'SERSIC_BA', 'SERSIC_PHI', 'PETRO_THETA',
-    'IAUNAME', 'ZDIST', 'RUN', 'CAMCOL', 'FIELD', 'RERUN',
-]
-nsaRas = nsa[1].data['ra']
-nsaDecs = nsa[1].data['dec']
-
-df_nsa = pd.DataFrame(
-    {key: nsa[1].data[key].byteswap().newbyteorder() for key in nsa_keys}
-)
-
+print('Loading Zooniverse classification dump')
 classifications = pd.read_csv('../classifications/galaxy-builder-classifications_24-7-18.csv')
 subjects = pd.read_csv('../classifications/galaxy-builder-subjects_24-7-18.csv')
 null = None
 true = True
 false = False
 
+print('Obtaining available frame montages')
 # Some galaxies were montaged when created. Create a list of their coordinates for use later
 montages = [f for f in os.listdir('montageOutputs') if not f[0] == '.']
 montageCoordinates = np.array([
@@ -62,6 +46,21 @@ montageCoordinates = np.array([
     else [float(j) for j in i.replace('-', ' -').split(' ')]
     for i in [f for f in os.listdir('montageOutputs') if not f[0] == '.']
 ])
+
+
+def prettyPlot(arm, c, ax=plt.gca(), **kwargs):
+    ax.plot(
+        *arm.T,
+        c=c, linewidth=4
+    )
+    ax.plot(
+        *arm.T, linewidth=3, **kwargs
+    )
+    ax.plot(
+        *arm.T,
+        c='w', linewidth=2, alpha=0.5
+    )
+
 
 def main(id):
     print('Working on galaxy {}'.format(id))
@@ -140,7 +139,7 @@ def main(id):
         deprojectedImage = stretchedImage.copy()
 
 
-    print('\t- Custering arms')
+    print('\t- Clustering arms')
     # Onto the clustering and fitting
     # Extract the drawn arms from classifications for this galaxy
     drawnArms = getDrawnArms(subjectId, classifications)
@@ -148,38 +147,28 @@ def main(id):
     # We'll make use of the `gzbuilderspirals` class method to cluster arms.
     # First, initialise a `GalaxySpirals` object with the arms and deprojection
     # parameters
-    s = GalaxySpirals(drawnArms, ba=gal['SERSIC_BA'].iloc[0], phi=-angle)
+    galaxy_object = GalaxySpirals(drawnArms, ba=gal['SERSIC_BA'].iloc[0], phi=-angle)
 
     # Now calculate a the distance matrix for the drawn arms (this can be slow)
     try:
         distances = np.load('distances/subject-{}.npy'.format(id))
         print('\t- Using saved distances')
     except OSError:
-        distances = s.calculateDistances()
+        distances = galaxy_object.calculateDistances()
         np.save('distances/subject-{}.npy'.format(id), distances)
 
     # Perform the clustering (using the DBSCAN clustering algorithm)
-    db = s.clusterLines(distances)
+    db = galaxy_object.clusterLines(distances)
 
-    print('\t- Fitting splines')
+    print('\t- Fitting arms and errors')
     # Fit both XY and radial splines to the resulting clusters (described in more detail in the method paper)
-    xyFits = s.fitXYSplines()
-    result = s.fitRadialSplines()
+    galaxy_fit = galaxy_object.fitArms()
+    dpjArms = galaxy_object.deprojectArms()
+
+    splines = [r['xy_fit']['spline'] for r in galaxy_fit]
 
     # PLOTTING
     # Add a helper function to generate plots of the resulting arms
-    def prettyPlot(arm, c, ax=plt.gca(), **kwargs):
-        ax.plot(
-            *arm.T,
-            c='k'.format(i), linewidth=4
-        )
-        ax.plot(
-            *arm.T, linewidth=3, **kwargs
-        )
-        ax.plot(
-            *arm.T,
-            c='w', linewidth=2, alpha=0.5
-        )
     plt.figure(figsize=(27, 10), dpi=200)
     plt.subplots_adjust(wspace=0.1, hspace=0.1)
     ax_annot = plt.subplot2grid((2, 5), (0, 0), colspan=2, rowspan=2)
@@ -194,7 +183,7 @@ def main(id):
 
     # panel 2: clustered arms
     ax_cluster.imshow(picArray, cmap='gray', origin='lower')
-    for i, arm in enumerate(s.arms):
+    for i, arm in enumerate(galaxy_object.arms):
         p = ax_cluster.plot(
             *arm.cleanedCloud.T,
             '.',
@@ -228,7 +217,7 @@ def main(id):
 
     # panel 3: Final splines
     ax_final.imshow(deprojectedImage, cmap='gray', origin='lower')
-    for i, arm in enumerate(result['deprojectedArms']):
+    for i, arm in enumerate(dpjArms):
         p = ax_final.plot(
             *arm.cleanedCloud.T,
             '.',
@@ -245,9 +234,9 @@ def main(id):
             label='Outlier points in arm {}'.format(i)
         )
 
-    for i, arm in enumerate(result['radialFit']):
+    for i, arm in enumerate(splines):
         prettyPlot(
-            s.arms[i].deNorm(arm),
+            galaxy_object.arms[i].deNorm(arm),
             ax=ax_final,
             label='Arm {}. {} drawn poly-lines'.format(
                 i,
@@ -259,65 +248,88 @@ def main(id):
 
     plt.savefig('arm-fits/subject-{}.jpg'.format(id), bbox_inches='tight')
     plt.close()
+    if len(galaxy_fit) > 0:
+        plt.figure(figsize=(16, 8))
+        for armN, armFit in enumerate(galaxy_fit):
+            # plotting
 
-    # calculate pitch angles
-    print('\t- Creating pitch angle plot')
-    plt.figure(figsize=(14, 7))
-    # first panel is the galaxy, including start and end of arms
-    plt.subplot(121)
-    plt.imshow(deprojectedImage, cmap='gray', origin='lower')
-    for i, arm in enumerate(result['radialFit']):
-        prettyPlot(
-            s.arms[i].deNorm(arm),
-            ax=plt.gca(),
-            label='Arm {}'.format(i),
-            c='C{}'.format(i)
-        )
-    plt.plot(
-        *[deprojectedImage.shape[0] / 2] * 2,
-        'x',
-        markersize=10,
-        label='center'
-    )
-    plt.subplot(122)
-    getRadius = lambda c: np.sqrt(np.add.reduce(c**2, axis=1))
+            # Left panel: plot the spirals and errors over the galaxy image
+            plt.subplot(121, label='left_panel')
 
-    for i, arm in enumerate(result['radialFit']):
-        if getRadius(arm[0].reshape(1, 2)) > getRadius(arm[-1].reshape(1, 2)):
-            arm = arm[::-1]
+            # show the galaxy
+            plt.imshow(deprojectedImage, cmap='gray_r', origin='lower', extent=[-0.5, 0.5, -0.5, 0.5])
 
-        pas = np.zeros(arm.shape[0] - 2)
-        O = np.array([0, 0])
-        for j in range(1, arm.shape[0] - 1):
-            pnm1 = arm[j - 1]
-            pn = arm[j]
-            pnp1 = arm[j + 1]
-            unitTangent = (pnp1 - pnm1) / np.linalg.norm(pnp1 - pnm1)
-
-            pas[j - 1] = np.rad2deg(
-                np.pi / 2 - np.arccos(
-                    np.dot(pn / np.linalg.norm(pn), unitTangent)
-                )
+            # plot the log spiral and errors
+            p = plt.plot(
+                *armFit['xy_fit']['log_spiral'].T,
+                color='C{}'.format(armN * 2 + 1),
+                linewidth=2, label='Logarithmic Spiral, arm {}'.format(armN)
             )
-        plt.plot(
-            getRadius(arm[1: -1]),
-            pas,
-            '-',
-            c='C{}'.format(i % 10),
-            label='Arm {}'.format(i)
-        )
+            c = np.array(to_rgb(p[0].get_color())) * 0.8
+            plt.plot(*armFit['xy_fit']['log_spiral_error'][0].T, '--', c=c)
+            plt.plot(*armFit['xy_fit']['log_spiral_error'][1].T, '--', c=c)
+                     # label='Log Spiral $1\sigma$ error')
 
-    plt.xlabel('Distance from center of galaxy (arbitrary units)')
-    plt.ylabel('Measured pitch angle (degrees)')
-    plt.legend()
-    plt.savefig('pitchAngles/subject-{}.jpg'.format(id), bbox_inches='tight')
-    plt.close()
+            # plot the spline and errors
+            p = plt.plot(
+                *armFit['xy_fit']['spline'].T,
+                linewidth=2,
+                color='C{}'.format(armN * 2),
+                label='Spline Spiral, arm {}'.format(armN)
+            )
+            c = np.array(to_rgb(p[0].get_color())) * 0.8
+            plt.plot(*armFit['xy_fit']['spline_error'][0].T, '--', c=c)
+            plt.plot(*armFit['xy_fit']['spline_error'][1].T, '--', c=c)
+            #         label='Spline Spiral $1\sigma$ error')
 
+            plt.xlim(-0.5, 0.5)
+            plt.ylim(-0.5, 0.5)
+            plt.axis('off')
+            plt.legend()
+            plt.tight_layout()
+
+            plt.subplot(122, label='right_panel')
+
+            pa_obj = armFit['pitch_angle']
+            spline_r = armFit['radial']['spline']['r']
+            r_bounds = (np.min(spline_r), np.max(spline_r))
+
+            p = plt.plot(
+                spline_r[1:-1], pa_obj['spline'][0],
+                color='C{}'.format(armN * 2),
+                label='Spline fit pitch angle, arm {}'.format(armN)
+            )
+            c = np.array(to_rgb(p[0].get_color()))
+            plt.fill_between(
+                spline_r[1:-1],
+                *pa_obj['spline'][1:],
+                alpha=0.2, color=c,
+            )
+            p = plt.hlines(
+                pa_obj['log_spiral'][0],
+                *r_bounds,
+                color=c * 0.8,
+                linestyle='--',
+                label='Log Spiral pitch angle, arm {}'.format(armN)
+            )
+            plt.fill_between(
+                np.linspace(np.min(spline_r), np.max(spline_r), spline_r.shape[0]),
+                pa_obj['log_spiral'][0] - pa_obj['log_spiral'][1],
+                pa_obj['log_spiral'][0] + pa_obj['log_spiral'][1],
+                alpha=0.1, color='k'
+            )
+
+        plt.ylabel('Pitch angle (degrees)')
+        plt.xlabel('Distance from center of galaxy (arbitrary units)')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig('error-plots/subject-{}.jpg'.format(id), bbox_inches='tight')
+        plt.close()
 
 if __name__ == '__main__':
     with open('subject-id-list.csv', 'r') as f:
         subjectIds = np.array([int(n) for n in f.read().split('\n')])
-    np.random.shuffle(subjectIds)
+    # np.random.shuffle(subjectIds)
     # we will write the notebooks out to here
     outputFolder = 'output-notebooks'
     if not os.path.exists(outputFolder):
