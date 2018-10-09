@@ -318,7 +318,7 @@ def main(id):
                 pa_obj['log_spiral'][0] + pa_obj['log_spiral'][1],
                 alpha=0.1, color='k'
             )
-
+        plt.xlim(left=0.05)
         plt.ylabel('Pitch angle (degrees)')
         plt.xlabel('Distance from center of galaxy (arbitrary units)')
         plt.legend()
