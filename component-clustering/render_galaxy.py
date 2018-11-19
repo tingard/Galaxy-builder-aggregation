@@ -153,21 +153,21 @@ def plot_model(model, psf, galaxy_data):
     image_data = asinh_stretch(galaxy_data)
     difference_data = compare_to_galaxy(model, psf, galaxy_data)
     model_data = post_process(model, psf)
-    data_min = np.min(np.stack((image_data, difference_data, model_data)))
-    data_max = np.max(np.stack((image_data, difference_data, model_data)))
-    most_extreme = max(np.abs(data_min), np.abs(data_max))
+    # data_min = np.min(np.stack((image_data, difference_data, model_data)))
+    # data_max = np.max(np.stack((image_data, difference_data, model_data)))
+    # most_extreme = max(np.abs(data_min), np.abs(data_max))
     kwargs = {
-        'vmin': -most_extreme,
-        'vmax': most_extreme,
+        'vmin': -1,  # -most_extreme,
+        'vmax': 1,  # most_extreme,
         'origin': 'lower',
         'cmap': 'RdGy'
     }
     plt.figure(figsize=(17, 4))
     plt.subplot(131, label='galaxy-data')
-    plt.imshow(asinh_stretch(galaxy_data), **kwargs)
+    plt.imshow(image_data, **kwargs)
     plt.colorbar()
     plt.subplot(132, label='model-data')
-    plt.imshow(post_process(model, psf), **kwargs)
+    plt.imshow(model_data, **kwargs)
     plt.colorbar()
     plt.subplot(133, label='difference-data')
     plt.imshow(difference_data, **kwargs)
