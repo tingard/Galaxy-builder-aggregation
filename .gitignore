@@ -1,3 +1,11 @@
 spiral-aggregation/fitsImages
 spiral-aggregation/montageOutputs
+spiral-aggregation/sparcfire-fits/
+
+component-clustering/__pycache__/
+component-clustering/NSA_filtered.pkl
+component-clustering/images
+component-clustering/montageOutputs
+component-clustering/createSubjectsFunctions.py
+component-clustering/sdss_psf.py
 MaNGA_gz.fits

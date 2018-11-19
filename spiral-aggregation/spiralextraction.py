@@ -10,8 +10,6 @@
 #     5. Sort points in cluster
 #     6. Fit a smoothing spline to ordered points
 # 3. Calculate pitch angles for the resulting spline fits
-
-print('Doing imports...')
 import os
 from tempfile import NamedTemporaryFile
 import numpy as np
@@ -21,10 +19,9 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb
 from matplotlib.patches import Ellipse
 from PIL import Image
-from astropy.io import fits
 from skimage.transform import rotate, rescale
 from gzbuilderspirals import deprojecting as dpj
-from gzbuilderspirals import getDrawnArms, rThetaFromXY, xyFromRTheta
+from gzbuilderspirals import getDrawnArms
 from gzbuilderspirals.galaxySpirals import GalaxySpirals
 
 print('Loading NSA catalog')
@@ -48,22 +45,8 @@ montageCoordinates = np.array([
 ])
 
 
-def prettyPlot(arm, c, ax=plt.gca(), **kwargs):
-    ax.plot(
-        *arm.T,
-        c=c, linewidth=4
-    )
-    ax.plot(
-        *arm.T, linewidth=3, **kwargs
-    )
-    ax.plot(
-        *arm.T,
-        c='w', linewidth=2, alpha=0.5
-    )
-
-
-def main(id):
-    print('Working on galaxy {}'.format(id))
+def main(id, shouldShowPoints=False):
+    print('Working on galaxy', id)
     subjectId = id
 
     # Grab the metadata of the subject we are working on
@@ -166,10 +149,30 @@ def main(id):
     dpjArms = galaxy_object.deprojectArms()
 
     splines = [r['xy_fit']['spline'] for r in galaxy_fit]
+    errors = list(zip(
+        (r['xy_fit']['spline_error'][0] for r in galaxy_fit),
+        (r['xy_fit']['spline_error'][1] for r in galaxy_fit)
+    ))
 
     # PLOTTING
-    # Add a helper function to generate plots of the resulting arms
-    plt.figure(figsize=(27, 10), dpi=200)
+    # figure 1: plot all the drawn arms
+    plt.figure(dpi=100).tight_layout()
+    plt.imshow(picArray, cmap='gray_r', origin='lower')
+    for arm in drawnArms:
+        plt.plot(*arm.T, '.-', linewidth=0.5, markersize=1, alpha=0.9)
+    plt.gca().set_xticklabels([])
+    plt.gca().set_yticklabels([])
+    plt.axis('off')
+    plt.subplots_adjust(
+        left=0.0, right=1.0,
+        bottom=0.0, top=1.0,
+        wspace=0.0, hspace=0.0
+    )
+    plt.savefig('drawn-arms/subject-{}.jpg'.format(id), bbox_inches='tight', pad_inches=0)
+    plt.close()
+
+    # figure 2: plot the spline fit
+    plt.figure(figsize=(27, 10), dpi=100)
     plt.subplots_adjust(wspace=0.1, hspace=0.1)
     ax_annot = plt.subplot2grid((2, 5), (0, 0), colspan=2, rowspan=2)
     ax_cluster = plt.subplot2grid((2, 5), (0, 2))
@@ -177,34 +180,34 @@ def main(id):
     ax_final = plt.subplot2grid((2, 5), (0, 3), colspan=2, rowspan=2)
 
     # panel 1: all drawn arms
-    ax_annot.imshow(picArray, cmap='gray', origin='lower')
+    ax_annot.imshow(picArray, cmap='gray_r', origin='lower')
     for arm in drawnArms:
         ax_annot.plot(*arm.T, '.-', linewidth=1, markersize=2)
 
     # panel 2: clustered arms
-    ax_cluster.imshow(picArray, cmap='gray', origin='lower')
+    ax_cluster.imshow(picArray, cmap='gray_r', origin='lower')
     for i, arm in enumerate(galaxy_object.arms):
         p = ax_cluster.plot(
-            *arm.cleanedCloud.T,
+            *arm.pointCloud.T,
             '.',
             c='C{}'.format(i % 10),
             markersize=2,
             label='Cleaned points in arm {}'.format(i)
         )
-        c = np.array(to_rgb(p[0].get_color()))*0.7
-        p = ax_cluster.plot(
-            *arm.pointCloud[np.logical_not(arm.outlierMask)].T,
-            'x',
-            c=c,
-            markersize=3,
-            alpha=1,
-            label='Outlier points removed from arm {}'.format(i)
-        )
+        # c = np.array(to_rgb(p[0].get_color()))*0.7
+        # p = ax_cluster.plot(
+        #     *arm.pointCloud[np.logical_not(arm.outlierMask)].T,
+        #     'x',
+        #     c=c,
+        #     markersize=3,
+        #     alpha=1,
+        #     label='Outlier points removed from arm {}'.format(i)
+        # )
 
     plt.setp(ax_cluster.get_xticklabels(), visible=False)
 
     # panel 3: NSA isophote
-    ax_isophote.imshow(picArray, cmap='gray', origin='lower')
+    ax_isophote.imshow(picArray, cmap='gray_r', origin='lower')
     isophote = Ellipse(
         xy=np.array(picArray.shape) / 2,
         width=200 * gal['SERSIC_BA'],
@@ -216,38 +219,55 @@ def main(id):
     ax_isophote.add_artist(isophote)
 
     # panel 3: Final splines
-    ax_final.imshow(deprojectedImage, cmap='gray', origin='lower')
-    for i, arm in enumerate(dpjArms):
-        p = ax_final.plot(
-            *arm.cleanedCloud.T,
-            '.',
-            c='C{}'.format(i % 10),
-            markersize=2,
-            label='Cleaned points in arm {}'.format(i)
-        )
-        c = np.array(to_rgb(p[0].get_color()))*0.7
-        p = ax_final.plot(
-            *arm.pointCloud[np.logical_not(arm.outlierMask)].T,
-            'x',
-            c=c,
-            markersize=4,
-            label='Outlier points in arm {}'.format(i)
-        )
+    ax_final.imshow(deprojectedImage, cmap='gray_r', origin='lower')
+
+    if shouldShowPoints:
+        for i, arm in enumerate(dpjArms):
+            p = ax_final.plot(
+                *arm.cleanedCloud[:1].T,
+                '.',
+                c='C{}'.format(i % 10),
+                markersize=2,
+                label='Cleaned points in arm {}'.format(i)
+            )
+            c = np.array(to_rgb(p[0].get_color()))
+            p = ax_final.plot(
+                *arm.pointCloud[np.logical_not(arm.outlierMask)].T,
+                'x',
+                c=c * 0.7,
+                markersize=4,
+                alpha=0.9,
+                label='Outlier points in arm {}'.format(i)
+            )
+            ax_final.plot(
+                *arm.cleanedCloud.T,
+                '.',
+                c=c,
+                markersize=2,
+                alpha=0.9,
+                label='Cleaned points in arm {}'.format(i)
+            )
 
     for i, arm in enumerate(splines):
-        prettyPlot(
-            galaxy_object.arms[i].deNorm(arm),
-            ax=ax_final,
+        p = ax_final.plot(
+            *galaxy_object.arms[i].deNorm(arm).T,
             label='Arm {}. {} drawn poly-lines'.format(
                 i,
                 np.where(db.labels_ == i)[0].shape[0]
             ),
-            c='C{}'.format(i)
+            c='C{}'.format(i % 10)
+        )
+        c = np.array(to_rgb(p[0].get_color())) * 0.8
+        ax_final.plot(*galaxy_object.arms[i].deNorm(errors[i][0]).T, '--', c=c)
+        ax_final.plot(*galaxy_object.arms[i].deNorm(errors[i][1]).T, '--', c=c,
+                      label='Arm {} $1\,\sigma$ error'.format(i),
         )
     ax_final.legend()
 
     plt.savefig('arm-fits/subject-{}.jpg'.format(id), bbox_inches='tight')
     plt.close()
+
+    # figure 3: plot the log spiral fit and errors, if we have arms
     if len(galaxy_fit) > 0:
         plt.figure(figsize=(16, 8))
         for armN, armFit in enumerate(galaxy_fit):
