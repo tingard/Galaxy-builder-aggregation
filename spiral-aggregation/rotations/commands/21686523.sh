@@ -1,1 +1,0 @@
-ds9 fitsImages/5112/4/frame-r-005112-4-0301.fits -regions ./rotations/regions/21686523.reg

@@ -1,6 +1,4 @@
-import numpy as np
 import copy
-import galaxy_utilities as gu
 
 
 def migrate_slider_to_subtask(task):
@@ -8,7 +6,7 @@ def migrate_slider_to_subtask(task):
     _t = copy.deepcopy(task)
     for i in _t['value'][0]['value']:
         i['details'] = [
-            { 'task': subtask['task'], 'value': float(subtask['value']) }
+            {'task': subtask['task'], 'value': float(subtask['value'])}
             for subtask in task['value'][1:]
         ]
     return _t
@@ -58,13 +56,3 @@ def _flatten_component(component):
 
 def sklearn_flatten(component_array):
     return [_flatten_component(c) for c in component_array]
-
-
-# if __name__ == "__main__":
-#     id = 21096878
-#     print('Getting galaxy data')
-#     gal, angle = gu.get_galaxy_and_angle(id)
-#     url = gu.getUrl(id)
-#     classifications, pic_array, deprojected_image = gu.get_image(
-#         gal, id, angle
-#     )

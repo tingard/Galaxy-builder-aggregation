@@ -20,6 +20,8 @@ import json
 import requests
 from PIL import Image
 from skimage.transform import rotate, rescale
+from gzbuilderspirals import get_drawn_arms
+from gzbuilderspirals.galaxySpirals import GalaxySpirals
 from gzbuilderspirals import deprojecting as dpj
 
 print('Loading NSA catalog')
@@ -181,3 +183,40 @@ def get_psf(subject_id):
     with open(difference_fname) as difference_file:
         difference = json.load(difference_file)
     return np.array(difference['psf'], 'f8').reshape(11, 11)
+
+
+def get_galaxy_spirals(gal, angle, id, classifications):
+    print('\t- Clustering arms')
+    # Onto the clustering and fitting
+    # Extract the drawn arms from classifications for this galaxy
+    drawnArms = get_drawn_arms(id, classifications)
+
+    # We'll make use of the `gzbuilderspirals` class method to cluster arms.
+    # First, initialise a `GalaxySpirals` object with the arms and deprojection
+    # parameters
+    galaxy_object = GalaxySpirals(
+        drawnArms,
+        ba=gal['SERSIC_BA'].iloc[0],
+        phi=-angle
+    )
+
+    # Now calculate a the distance matrix for the drawn arms (this can be slow)
+    try:
+        distances = np.load('distances/subject-{}.npy'.format(id))
+        print('\t- Using saved distances')
+    except OSError:
+        distances = galaxy_object.calculate_distances()
+        np.save('distances/subject-{}.npy'.format(id), distances)
+
+    # Perform the clustering (using the DBSCAN clustering algorithm)
+    galaxy_object.cluster_lines(distances)
+
+    print('\t- Fitting arms and errors')
+    # Fit both XY and radial splines to the resulting clusters (described in
+    # more detail in the method paper)
+    return galaxy_object
+
+
+def fitThings(galaxy_object):
+    galaxy_fit = galaxy_object.fit_arms(spline_degree=3)
+    return galaxy_fit
