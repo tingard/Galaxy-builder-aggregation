@@ -26,20 +26,20 @@ from gzbuilderspirals import deprojecting as dpj
 
 # needed as we want to load files relative to this file's location, not the
 # current working directory
-def getPath(s):
+def get_path(s):
     return '{}/{}'.format(
         os.path.abspath(os.path.dirname(__file__)),
         s
     )
 print('Loading NSA catalog')
-df_nsa = pd.read_pickle(getPath('NSA_filtered.pkl'))
+df_nsa = pd.read_pickle(get_path('NSA_filtered.pkl'))
 
 print('Loading Zooniverse classification dump')
 classifications = pd.read_csv(
-    getPath('../classifications/galaxy-builder-classifications_15-11-18.csv')
+    get_path('../classifications/galaxy-builder-classifications_15-11-18.csv')
 )
 subjects = pd.read_csv(
-    getPath('../classifications/galaxy-builder-subjects_24-7-18.csv')
+    get_path('../classifications/galaxy-builder-subjects_24-7-18.csv')
 )
 null = None
 true = True
@@ -48,7 +48,7 @@ false = False
 print('Obtaining available frame montages')
 # Some galaxies were montaged when created. Create a list of their coordinates
 # for use later
-montage_output_path = getPath('montageOutputs')
+montage_output_path = get_path('montageOutputs')
 montages = [f for f in os.listdir(montage_output_path) if not f[0] == '.']
 montageCoordinates = np.array([
     [float(j) for j in i.replace('+', ' ').split(' ')]
@@ -99,7 +99,7 @@ def get_galaxy_and_angle(id):
         montageFolder = montages[
             np.where(montagesDistanceMask)[0][0]
         ]
-        fitsName = getPath('./{}/{}/{}'.format(
+        fitsName = get_path('./{}/{}/{}'.format(
             'montageOutputs',
             montageFolder,
             'mosaic.fits'
@@ -194,31 +194,28 @@ def get_psf(subject_id):
 
 
 def get_galaxy_spirals(gal, angle, id, classifications):
-    print('\t- Clustering arms')
     # Onto the clustering and fitting
     # Extract the drawn arms from classifications for this galaxy
-    drawnArms = get_drawn_arms(id, classifications)
-
+    drawn_arms = get_drawn_arms(id, classifications)
+    print('\t Identified {} arms'.format(len(drawn_arms)))
     # We'll make use of the `gzbuilderspirals` class method to cluster arms.
     # First, initialise a `GalaxySpirals` object with the arms and deprojection
     # parameters
+    print('\t- Clustering arms')
     galaxy_object = GalaxySpirals(
-        drawnArms,
+        drawn_arms,
         ba=gal['SERSIC_BA'].iloc[0],
         phi=-angle
     )
-
-    # Now calculate a the distance matrix for the drawn arms (this can be slow)
-    try:
-        distances = np.load(getPath('distances/subject-{}.npy'.format(id)))
-        print('\t- Using saved distances')
-    except OSError:
-        print('\t- Calculating distances')
+    if os.path.isfile(get_path('distances/subject-{}.npy'.format(id))):
+        distances = np.load(get_path('distances/subject-{}.npy'.format(id)))
+        if distances.shape[0] != len(drawn_arms):
+            distances = galaxy_object.calculate_distances()
+            np.save(get_path('distances/subject-{}.npy'.format(id)), distances)
+    else:
         distances = galaxy_object.calculate_distances()
-        np.save('distances/subject-{}.npy'.format(id), distances)
 
-    # Perform the clustering (using the DBSCAN clustering algorithm)
-    galaxy_object.cluster_lines(distances)
+    db = galaxy_object.cluster_lines(distances)
 
     print('\t- Fitting arms and errors')
     # Fit both XY and radial splines to the resulting clusters (described in
