@@ -13,11 +13,13 @@
 #     6. Fit a smoothing spline to ordered points
 # 3. Calculate pitch angles for the resulting spline fits
 import os
+import re
 from tempfile import NamedTemporaryFile
 import numpy as np
 import pandas as pd
 import json
 import requests
+import subprocess
 from PIL import Image
 from skimage.transform import rotate, rescale
 from gzbuilderspirals import get_drawn_arms
@@ -31,10 +33,9 @@ def get_path(s):
         os.path.abspath(os.path.dirname(__file__)),
         s
     )
-print('Loading NSA catalog')
+
 df_nsa = pd.read_pickle(get_path('NSA_filtered.pkl'))
 
-print('Loading Zooniverse classification dump')
 classifications = pd.read_csv(
     get_path('../classifications/galaxy-builder-classifications_15-11-18.csv')
 )
@@ -45,7 +46,6 @@ null = None
 true = True
 false = False
 
-print('Obtaining available frame montages')
 # Some galaxies were montaged when created. Create a list of their coordinates
 # for use later
 montage_output_path = get_path('montageOutputs')
@@ -64,8 +64,7 @@ metadata = [eval(i) for i in subjects['metadata'].values]
 meta_map = {i: j for i, j in zip(subjects['subject_id'].values, metadata)}
 
 
-def get_galaxy_and_angle(id):
-    print('Working on galaxy {}'.format(id))
+def get_galaxy_and_angle(id, imShape=(512, 512)):
     subjectId = id
 
     # Grab the metadata of the subject we are working on
@@ -84,7 +83,7 @@ def get_galaxy_and_angle(id):
         )
 
     # Now we need to obtain the galaxy's rotation in Zooniverse image
-    # coordinates. This is made trickier by some decision in the subject
+    # coordinates. This is made trickier by some decisions in the subject
     # creation pipeline.
 
     # First, use a WCS object to obtain the rotation in pixel coordinates, as
@@ -94,28 +93,56 @@ def get_galaxy_and_angle(id):
         (montageCoordinates - [gal['RA'].iloc[0], gal['DEC'].iloc[0]])**2,
         axis=1
     ) < 0.01
-    usingMontage = np.any(montagesDistanceMask)
-    if usingMontage:
+    if np.any(montagesDistanceMask):
+        __import__('warnings').warn('Using montaged image')
         montageFolder = montages[
             np.where(montagesDistanceMask)[0][0]
         ]
-        fitsName = get_path('./{}/{}/{}'.format(
+        fits_name = get_path('{}/{}/{}'.format(
             'montageOutputs',
             montageFolder,
             'mosaic.fits'
         ))
-        print('\t- USING MONTAGED IMAGE')
     else:
-        fileTemplate = 'fitsImages/{0}/{1}/frame-r-{0:06d}-{1}-{2:04d}.fits'
-        fitsName = fileTemplate.format(
+        fileTemplate = get_path('fitsImages/{0}/{1}/frame-r-{0:06d}-{1}-{2:04d}.fits')
+        fits_name = fileTemplate.format(
             int(gal['RUN']),
             int(gal['CAMCOL']),
             int(gal['FIELD'])
         )
-
-    print('\t- Getting galaxy rotation')
-    angle = dpj.get_angle(gal, fitsName, np.array([512, 512]))
+    angle = dpj.get_angle(gal, fits_name, np.array(imShape)) % 180
     return gal, angle
+
+
+def get_ds9_region(gal, fits_name):
+    s = """# Region file format: DS9 version 4.1
+    global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" \
+select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1
+    fk5
+    ellipse({},{},{}",{}",{})"""
+    with open(get_path('regions/{}.reg'.format(id)), 'w') as f:
+        f.write(s.format(
+            float(gal['RA']),
+            float(gal['DEC']),
+            float(gal['PETRO_THETA'] * gal['SERSIC_BA']),
+            float(gal['PETRO_THETA']),
+            float(gal['SERSIC_PHI'])
+        ))
+    print(
+        ' '.join((
+            'ds9 {0}',
+            '-regions {1}',
+            '-pan to {2} {3} wcs degrees',
+            '-crop {2} {3} {4} {4} wcs degrees',
+            '-asinh -scale mode 99.5'
+        )).format(
+            fits_name,
+            get_path('regions/{}.reg'.format(id)),
+            gal['RA'].iloc[0],
+            gal['DEC'].iloc[0],
+            gal['PETRO_THETA'].iloc[0] * 2 / 3600,
+        ),
+    )
 
 
 def getUrl(id):
@@ -144,18 +171,7 @@ def get_image(gal, id, angle):
     picArray = np.array(pic)
 
     # Now deproject the image of the galaxy:
-    rotatedImage = rotate(picArray, angle)
-    stretchedImage = rescale(
-        rotatedImage,
-        (1/gal['SERSIC_BA'].iloc[0], 1),
-        mode='constant',
-        multichannel=False
-    )
-    n = int((stretchedImage.shape[0] - np.array(pic).shape[0]) / 2)
-    if n > 0:
-        deprojectedImage = stretchedImage[n:-n, :]
-    else:
-        deprojectedImage = stretchedImage.copy()
+    deprojectedImage = dpj.deproject_array(picArray, angle, gal['SERSIC_BA'].iloc[0])
     return picArray, deprojectedImage
 
 
@@ -177,7 +193,7 @@ def get_image_data(subject_id):
 
 
 def get_psf(subject_id):
-    with open('location-map.json') as location_map_file:
+    with open(get_path('location-map.json')) as location_map_file:
         location_map = json.load(location_map_file)
     location = location_map[str(subject_id)]
     subject_set = os.path.expanduser(
