@@ -176,7 +176,7 @@ def get_image(gal, id, angle):
 
 
 def get_image_data(subject_id):
-    with open('location-map.json') as location_map_file:
+    with open(get_path('location-map.json')) as location_map_file:
         location_map = json.load(location_map_file)
     location = location_map[str(subject_id)]
     subject_set = os.path.expanduser(
