@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.model_selection import GroupKFold
+from sklearn.model_selection import GroupKFold, cross_val_score
 from sklearn.linear_model import BayesianRidge
 from gzbuilderspirals import r_theta_from_xy, fitting
 from gzbuilderspirals.galaxySpirals import GalaxySpirals
@@ -145,7 +145,7 @@ if __name__ == '__main__':
 
     R_centered = R - R.mean()
     Rp = np.log(R)
-    Rp_centered = Rp - Rp.mean()
+    R p_centered = Rp - Rp.mean()
 
     point_weights = dpj_arms[0].get_sample_weight(R)
     plt.plot(R_centered, point_weights)

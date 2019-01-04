@@ -1,11 +1,9 @@
 import numpy as np
 from scipy.signal import convolve2d
-from gzbuilderspirals.metric import v_calc_t, v_get_diff
-from multiprocessing import Pool
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-
+from shapely.geometry import LineString, MultiPoint
+from copy import copy
+from scipy.interpolate import splprep, splev
 # Many of these functions are copied and translated from
 # https://github.com/zooniverse/Panoptes-Front-End/blob/master/app/features/modelling/galaxy-builder
 # without optimization.
@@ -19,6 +17,13 @@ default_disk = {
 }
 default_spiral = {
     'i0': 1, 'spread': 1, 'falloff': 1,
+}
+
+MODEL_COMPARISON_IMSHOW_KWARGS = {
+    'vmin': -1,
+    'vmax': 1,
+    'origin': 'lower',
+    'cmap': 'RdGy'
 }
 
 
@@ -72,6 +77,8 @@ def _sersic_comp(comp, x, y):
 
 
 def sersic_comp(comp, image_size=512, oversample_n=1):
+    if comp is None:
+        return np.zeros((image_size, image_size))
     oversample_grid = np.meshgrid(
         np.linspace(0, image_size, image_size*oversample_n),
         np.linspace(0, image_size, image_size*oversample_n)
@@ -87,53 +94,88 @@ def sersic_comp(comp, image_size=512, oversample_n=1):
     ).mean(3).mean(1)
 
 
-def length(a):
-    return np.sqrt(np.add.reduce(a**2))
+def spiral_distance_shapely(points, poly_line, output_shape=(256, 256)):
+    m = MultiPoint(points)
+    line = LineString(poly_line)
+    correct_values = np.fromiter((i.distance(line) for i in m), count=len(m), dtype=float).reshape(output_shape)
+    return correct_values
 
 
-def get_distance_from_polyline(a, b):
-    m = np.zeros((a.shape[0], b.shape[0] - 1, 3, 2))
-    m[:, :, 0, :] = np.transpose(
-        np.tile(a, [m.shape[1] + 1, 1, 1]),
-        axes=[1, 0, 2]
-    )[:, :-1, :]
-    m[:, :, 1, :] = np.tile(b, [a.shape[0], 1, 1])[:, :-1, :]
-    m[:, :, 2, :] = np.tile(
-        np.roll(b, -1, axis=0), [a.shape[0], 1, 1]
-    )[:, :-1, :]
-    # t[i, j] = ((a[i] - b[j]) . (b[j + 1] - b[j])) / (b[j + 1] - b[j]|**2
-    t = v_calc_t(np.array(m))
-    return v_get_diff(t, m)
+def numpy_squared_distance_to_point(P, poly_line):
+    """
+    f(t) = (1−t)A + tB − P
+    t = [(P - A).(B - A)] / |B - A|^2
+    """
+    u = P - poly_line[:-1]
+    v = poly_line[1:] - poly_line[:-1]
+    dot = u[:, 0] * v[:, 0] + u[:, 1] * v[:, 1]
+    t = np.clip(dot / (v[:, 0]**2 + v[:, 1]**2), 0, 1)
+    # sep = (1.0 - t) * A + t*B - P
+    # sep = A - t*A + t*B - P
+    # sep = t*(B - A) - (P - A)
+    sep = (v.T * t).T - u
+    return np.min(sep[:, 0]**2 + sep[:, 1]**2)
 
 
-def do_batch_dist(args):
-    return np.sqrt(get_distance_from_polyline(args[0], args[1]))
+_npsdtp_vfunc = np.vectorize(
+    numpy_squared_distance_to_point,
+    signature='(d),(n,d)->()'
+)
+
+
+def spiral_distance_numpy(points, poly_line, output_shape=(256, 256)):
+    return np.sqrt(
+        _npsdtp_vfunc(
+            points, poly_line,
+        )
+    ).reshape(*output_shape)
 
 
 def spiral_arm(arm_points, params=default_spiral, disk=default_disk,
-               image_size=512):
+               image_size=512, point_list=None):
+    if disk is None or len(arm_points) < 2:
+        return np.zeros((image_size, image_size))
+
     cx, cy = np.meshgrid(np.arange(image_size), np.arange(image_size))
-    batches = np.stack((cx, cy), axis=2)
 
-    with Pool() as p:
-        distances = np.array(
-            p.map(
-                do_batch_dist,
-                ((batch, arm_points) for batch in batches),
-            )
-        )
+    disk_arr = _sersic_comp({**disk, 'i0': 1}, cx, cy)
 
-    return params['i0'] * np.exp(-distances**2 * 0.1 / params['spread']) \
-        * np.exp(
-            -calc_boxy_ellipse_dist(
-                cx, cy,
-                disk['mu'],
-                disk['roll'],
-                disk['rEff'],
-                disk['axRatio'],
-                disk['c']
-            ) / params['falloff']
+    arm_distances = spiral_distance_shapely(
+        np.vstack((cx.ravel(), cy.ravel())).T,
+        arm_points,
+        output_shape=disk_arr.shape
+    )
+
+    return (
+        params['i0']
+        * np.exp(-arm_distances**2 * 0.1 / max(params['spread'], 1E-10))
+        * disk_arr
+    )
+
+
+def render_galaxy(parsed_annotation, image_size, oversample_n=5,
+                  point_list=None):
+    disk_arr = sersic_comp(parsed_annotation['disk'],
+                           image_size=image_size,
+                           oversample_n=oversample_n)
+    bulge_arr = sersic_comp(parsed_annotation['bulge'],
+                            image_size=image_size,
+                            oversample_n=oversample_n)
+
+    bar_arr = sersic_comp(parsed_annotation['bar'],
+                          image_size=image_size,
+                          oversample_n=oversample_n)
+    spirals_arr = np.add.reduce([
+        spiral_arm(
+            *s,
+            parsed_annotation['disk'],
+            image_size=image_size,
+            point_list=point_list
         )
+        for s in parsed_annotation['spiral']
+    ])
+    model = disk_arr + bulge_arr + bar_arr + spirals_arr
+    return model
 
 
 def compare_to_galaxy(arr, psf, galaxy):
@@ -149,30 +191,36 @@ def post_process(arr, psf):
     )
 
 
-def plot_model(model, psf, galaxy_data, return_ax=False):
+def plot_model(model, psf, galaxy_data, imshow_kwargs, **kwargs):
     image_data = asinh_stretch(galaxy_data)
     difference_data = compare_to_galaxy(model, psf, galaxy_data)
     model_data = post_process(model, psf)
-    # data_min = np.min(np.stack((image_data, difference_data, model_data)))
-    # data_max = np.max(np.stack((image_data, difference_data, model_data)))
-    # most_extreme = max(np.abs(data_min), np.abs(data_max))
-    kwargs = {
-        'vmin': -1,  # -most_extreme,
-        'vmax': 1,  # most_extreme,
+    imshow_kwargs = {
+        **imshow_kwargs,
+        'vmin': -1,
+        'vmax': 1,
         'origin': 'lower',
-        'cmap': 'RdGy'
+        'cmap': 'RdGy',
     }
-    plt.figure(figsize=(17, 4))
-    ax0 = plt.subplot(131, label='galaxy-data')
-    plt.imshow(image_data, **kwargs)
-    plt.colorbar()
-    ax1 = plt.subplot(132, label='model-data')
-    plt.imshow(model_data, **kwargs)
-    plt.colorbar()
-    ax2 = plt.subplot(133, label='difference-data')
-    plt.imshow(difference_data, **kwargs)
-    plt.colorbar()
-    plt.subplots_adjust(0, 0, 1.0, 1.0)
-    if return_ax:
-        return difference_data, ax0, ax1, ax2
+
+    fig, (ax0, ax1, ax2) = plt.subplots(ncols=3, figsize=(15, 5), sharex=True,
+                                        sharey=True)
+
+    panel0 = ax0.imshow(image_data, **imshow_kwargs)
+    ax1.imshow(model_data, **imshow_kwargs)
+    ax2.imshow(difference_data, **imshow_kwargs)
+
+    plt.subplots_adjust(right=0.9, wspace=0.1, hspace=0)
+    cax = fig.add_axes([0.91, 0.14, 0.02, 0.73])
+    plt.colorbar(panel0, cax=cax)
+
+    # add a shared x-axis label and y-axis label
+    fig.add_subplot(111, frameon=False)
+    # hide tick and tick label of the big axes
+    plt.tick_params(labelcolor='none', top=False, bottom=False,
+                    left=False, right=False)
+    plt.grid(False)
+    plt.suptitle(kwargs.get('title', ''))
+    plt.xlabel(kwargs.get('xlabel', 'Arcseconds from galaxy centre'))
+    plt.ylabel(kwargs.get('ylabel', 'Arcseconds from galaxy centre'))
     return difference_data

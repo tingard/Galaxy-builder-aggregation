@@ -25,6 +25,9 @@ from skimage.transform import rotate, rescale
 from gzbuilderspirals import get_drawn_arms
 from gzbuilderspirals.galaxySpirals import GalaxySpirals
 from gzbuilderspirals import deprojecting as dpj
+from shapely.geometry import box, Point
+from shapely.affinity import rotate as shapely_rotate, scale as shapely_scale
+
 
 # needed as we want to load files relative to this file's location, not the
 # current working directory
@@ -34,7 +37,7 @@ def get_path(s):
         s
     )
 
-df_nsa = pd.read_pickle(get_path('NSA_filtered.pkl'))
+df_nsa = pd.read_pickle(get_path('df_nsa.pkl'))
 
 classifications = pd.read_csv(
     get_path('../classifications/galaxy-builder-classifications_15-11-18.csv')
@@ -62,7 +65,7 @@ false = False
 null = None
 metadata = [eval(i) for i in subjects['metadata'].values]
 meta_map = {i: j for i, j in zip(subjects['subject_id'].values, metadata)}
-
+annotations = np.array([eval(i) for i in classifications['annotations'].values], dtype=object)
 
 def get_galaxy_and_angle(id, imShape=(512, 512)):
     subjectId = id
@@ -126,7 +129,7 @@ select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1
             float(gal['DEC']),
             float(gal['PETRO_THETA'] * gal['SERSIC_BA']),
             float(gal['PETRO_THETA']),
-            float(gal['SERSIC_PHI'])
+            float(gal['PETRO_PHI90'])
         ))
     print(
         ' '.join((
@@ -171,7 +174,7 @@ def get_image(gal, id, angle):
     picArray = np.array(pic)
 
     # Now deproject the image of the galaxy:
-    deprojectedImage = dpj.deproject_array(picArray, angle, gal['SERSIC_BA'].iloc[0])
+    deprojectedImage = dpj.deproject_array(picArray, angle, gal['PETRO_BA90'].iloc[0])
     return picArray, deprojectedImage
 
 
@@ -239,6 +242,23 @@ def get_galaxy_spirals(gal, angle, id, classifications):
     return galaxy_object
 
 
-def fitThings(galaxy_object):
-    galaxy_fit = galaxy_object.fit_arms(spline_degree=3)
-    return galaxy_fit
+def bar_geom_from_zoo(a):
+    b = box(
+        a['x'],
+        a['y'],
+        a['x'] + a['width'],
+        a['y'] + a['height']
+    )
+    return shapely_rotate(b, a['angle'])
+
+
+def ellipse_geom_from_zoo(a):
+    ellipse = shapely_rotate(
+        shapely_scale(
+            Point(a['x'], a['y']).buffer(1.0),
+            xfact=a['rx'],
+            yfact=a['ry']
+        ),
+        -a['angle']
+    )
+    return ellipse

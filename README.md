@@ -11,3 +11,8 @@ Generic useful scripts can be found in `/lib`, which is symlinked to each of the
 
 Don't even get me started on the list of Python dependancies....
 
+
+## Requirements
+- python 3 (ideally 3.6 or higher)
+- `numpy`, `pandas`, `requests`, `scipy`, `matplotlib`, `scikit-learn`, `scikit-image`, `astropy`, `shapely`, `descartes`, `panoptes-aggregation` all available using `pip install ...`
+- `gzbuilderspirals`, a custom package not on PyPi

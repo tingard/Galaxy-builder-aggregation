@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.neighbors import LocalOutlierFactor
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.model_selection import GroupKFold
 from sklearn.linear_model import BayesianRidge
@@ -13,43 +14,32 @@ clf_kwargs = {}
 clf_kwargs.setdefault('alpha_1', fitting.alpha_1_prior)
 clf_kwargs.setdefault('alpha_2', fitting.alpha_2_prior)
 
-clf = BayesianRidge(
-    compute_score=True,
-    fit_intercept=True,
-    copy_X=True,
-    normalize=True,
-    **clf_kwargs
-)
 
-
-# grab r and theta for each arm in the cluster
 def return_groups(self):
     drawn_arms_r_theta = [
         r_theta_from_xy(*self.normalise(a).T)
         for a in self.drawn_arms
     ]
-    # grab R array
-    R = np.fromiter(
-        (j for i in drawn_arms_r_theta for j in np.sort(i[0])),
-        dtype=float
-    )
-    # construct theta array
+    R = np.fromiter((j for i in drawn_arms_r_theta for j in np.sort(i[0])),
+                    dtype=float)
     t = np.array([])
     groups = np.array([])
-    # for each arm cluster...
+    dt = (np.arange(5) - 2) * 2 * np.pi
+    theta_mean = 0
     for i, (r, theta) in enumerate(drawn_arms_r_theta):
-        # unwrap the drawn arm
-        r_, t_ = fitting.unwrap_and_sort(r, theta)
-        # set the minimum theta of each arm to be in [0, 2pi) (not true in
-        # general but should pop out as an artefact of the clustering alg)
-        while np.min(t_) < 0:
-            t_ += 2*np.pi
-        # add this arm to the theta array
+        # out of all allowed transformations, which puts the mean of the theta
+        # values closest to the mean of rest of the points (using the first arm
+        # as a template)?
+        t_ = np.unwrap(theta)
+        if i == 0:
+            theta_mean = np.concatenate((t, t_)).mean()
+        j = np.argmin(np.abs(t_.mean() + dt - theta_mean))
+        t_ += dt[j]
         t = np.concatenate((t, t_))
         groups = np.concatenate((groups, np.repeat([i], t_.shape[0])))
-    # sort the resulting points by radius
-    a = np.argsort(R)
-    coords = np.stack((R[a], t[a]))
+    # sort the resulting points by radius (not really important)
+    # a = np.argsort(R)
+    coords = np.stack((R, t))
     return coords, groups
 
 
@@ -72,9 +62,8 @@ def get_data(chosenId):
         distances = galaxy_object.calculate_distances()
     galaxy_object.cluster_lines(distances)
     dpj_arms = galaxy_object.deproject_arms()
-
-    (R, t), groups = return_groups(dpj_arms[0])
-    point_weights = dpj_arms[0].get_sample_weight(R)
+    (R, t), groups = return_groups(dpj_arms[1])
+    point_weights = dpj_arms[1].get_sample_weight(R)
     return (R, t), groups, point_weights
 
 
@@ -95,7 +84,7 @@ def weighted_group_cross_val(pipeline, X, y, cv, groups, weights):
     return scores
 
 
-def log_spiral_pipeline():
+def get_log_spiral_pipeline():
     return make_pipeline(
         StandardScaler(),
         PolynomialFeatures(
@@ -116,7 +105,7 @@ def log_spiral_pipeline():
     )
 
 
-def spiral_fit_pipeline(degree):
+def get_polynomial_pipeline(degree):
     return make_pipeline(
         StandardScaler(),
         PolynomialFeatures(
@@ -134,16 +123,41 @@ def spiral_fit_pipeline(degree):
 
 
 if __name__ == '__main__':
-    chosenId = 21096790
+    chosenId = 21096794
     (R, t), groups, point_weights = get_data(chosenId)
-    plt.plot(R, point_weights)
-    plt.xlabel('Radius from centre')
-    plt.ylabel('Point weight')
+    R_normed, t_normed = R/R.std(), t/t.std()
+    alg = LocalOutlierFactor(contamination='auto', n_jobs=-1, n_neighbors=40, novelty=True)
+    res = np.ones(R.shape).astype(bool)
+
+    def foo(row):
+        X = np.stack((R_normed[row].reshape(-1), t_normed[row])).T
+        out = np.ones(R.shape[0], dtype=bool)
+        out[row] = alg.fit_predict(X) > 0
+        return out
+
+    for group in np.unique(groups):
+        print('working on group', group)
+        npoints = R[groups == group].shape[0]
+        testField = groups != group
+        X_train = np.stack((R_normed[testField].reshape(-1), t_normed[testField])).T
+        X_test = np.stack((R_normed[~testField].reshape(-1), t_normed[~testField])).T
+
+        alg.fit(X_train)
+        res[~testField] = alg.predict(X_test) > 0
+
+    plt.plot(R, t, '.')
+    plt.plot(R[res], t[res], '.', markersize=4)
+
+
 
     R = R.reshape(-1, 1)
+    plt.plot(R, t, '.')
+    plt.title(r'Input data $r$, $\theta$')
+    plt.xlabel('Radius from center')
+    plt.ylabel(r'$\theta$')
     Rp = np.log(R)
 
-    logsp_pipeline = spiral_fit_pipeline(1)
+    logsp_pipeline = get_polynomial_pipeline(1)
 
     gkf = GroupKFold(n_splits=5)
 
@@ -157,7 +171,7 @@ if __name__ == '__main__':
     print('Log spiral gives\n\tMean: {}\n\tSTD: {}'.format(s.mean(), s.std()))
 
     for degree in range(3, 9):
-        poly_model = spiral_fit_pipeline(degree)
+        poly_model = get_polynomial_pipeline(degree)
         s = weighted_group_cross_val(
             poly_model,
             R, t,
@@ -168,20 +182,27 @@ if __name__ == '__main__':
         print('Degree {} gives\n\tMean: {}\n\tSTD: {}'.format(
             degree, s.mean(), s.std()))
 
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.add_subplot(111, projection='polar')
-    ax.set_xlim(min(t), max(t))
-    plt.plot(t, R, '.')
+    fig = plt.figure(figsize=(15, 8))
+    ax = fig.add_subplot(121)
+    ax.semilogx(R, t, '.')
+    ax_polar = fig.add_subplot(122, projection='polar')
+    ax_polar.plot(t, R, '.')
+
+    R_predict = np.linspace(0.01, max(R), 300).reshape(-1, 1)
 
     logsp_pipeline.fit(Rp, t)
-    T = logsp_pipeline.predict(Rp)
-    plt.plot(T, R, label='Log spiral')
+    T = logsp_pipeline.predict(np.log(R_predict))
+    ax_polar.plot(T, R_predict, label='Log spiral')
+    ax.semilogx(R_predict, T)
 
     for degree in range(3, 9):
-        poly_model = spiral_fit_pipeline(degree)
+        poly_model = get_polynomial_pipeline(degree)
         poly_model.fit(R, t)
-        T = poly_model.predict(R)
-        plt.plot(T, R, label='$k={}$'.format(degree))
+        T = poly_model.predict(R_predict)
+        ax.semilogx(R_predict, T)
+        ax_polar.plot(T, R_predict, label='$k={}$'.format(degree))
 
-    plt.legend()
+    ax.set_xlabel('Radius from center')
+    ax.set_ylabel(r'$\theta$')
+    ax_polar.legend()
     plt.show()

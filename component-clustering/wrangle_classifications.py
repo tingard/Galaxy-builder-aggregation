@@ -1,6 +1,6 @@
 import copy
 import numpy as np
-from shapely.geometry import Polygon, box, Point
+from shapely.geometry import box, Point
 from shapely.affinity import rotate, scale
 
 
@@ -114,6 +114,8 @@ def ellipse_geom_from_zoo(a):
 
 
 def jaccard_distance(ob1, ob2):
+    if ob1.union(ob2).area <= 0:
+        return 1
     return 1 - ob1.intersection(ob2).area / ob1.union(ob2).area
 
 

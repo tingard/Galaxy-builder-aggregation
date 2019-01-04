@@ -1,93 +1,83 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
+import os
 import json
-from pprint import pprint
-from panoptes_aggregation.extractors.shape_extractor import shape_extractor
-from panoptes_aggregation.extractors.utilities import annotation_by_task
-from panoptes_aggregation.reducers.shape_reducer_dbscan import shape_reducer_dbscan
-from panoptes_aggregation.reducers.shape_reducer_hdbscan import shape_reducer_hdbscan
 import lib.galaxy_utilities as gu
-import wrangle_classifications as wc
-
-with open('tmp_cls_dump.json') as f:
-    classifications = json.load(f)
-
-def get_cls(subject_id):
-    classifications_for_subject = [
-        c for c in classifications
-        if c['links']['subjects'][0] == str(subject_id)
-    ]
-    # print('Found {} classifications for subject_id {}'.format(
-    #     len(classifications_for_subject),
-    #     subject_id,
-    # ))
-    annotations_for_subject = [i['annotations'] for i in classifications_for_subject]
-    return annotations_for_subject
 
 
-def get_disk(subject_id):
-    gal, angle = gu.get_galaxy_and_angle(subject_id)
+def compare_all_classifications():
+    with open('tmp_cls_dump.json') as f:
+        classifications = json.load(f)
 
-    psf = gu.get_psf(subject_id)
-    annotations_for_subject = get_cls(subject_id)
-    disks = [a[0] for a in annotations_for_subject if len(a) == 4]
-    converted_disks = [wc.convert_shape(d) for d in disks]
-    kwargs_extractor = {
-        'task': 'disk', 'shape': 'ellipse',
-        'details': {'disk_tool0': [None, 'slider_extractor']},
-    }
-    extracted_disks = [
-        shape_extractor(
-            annotation_by_task({ 'annotations': [d] }),
-            **kwargs_extractor
-        )
-        for d in converted_disks
-    ]
-    eps = 50
-    for i in range(20):
-        kwargs_reducer = {
-            'shape': 'ellipse',
-            'details': {'disk_tool0': [None, 'slider_reducer']},
-            'eps': eps, 'symmetric': True, 'min_samples': 5,
-        }
-        disk_clustering_result = shape_reducer_dbscan(
-            extracted_disks,
-            **kwargs_reducer,
-        )['frame0']
-        if len(np.unique(disk_clustering_result['disk_tool0_cluster_labels'])) > 2: # -1 and 0 wanted
-            eps *= 0.95
-        else:
-            eps *= 1.1
-    try:
-        label = 0
-        disk_kwargs = {
-            'xy': (disk_clustering_result['disk_tool0_clusters_x'][label], disk_clustering_result['disk_tool0_clusters_y'][label]),
-            'width': disk_clustering_result['disk_tool0_clusters_rx'][label],
-            'height': disk_clustering_result['disk_tool0_clusters_ry'][label],
-            'angle': -disk_clustering_result['disk_tool0_clusters_angle'][label],
-        }
-        final_disk = Ellipse(
-            **disk_kwargs,
-            ec='C{}'.format(label),
-            linewidth=3,
-            fc='none',
-        )
-        ba = disk_kwargs['width'] / disk_kwargs['height']
-        ba = min(ba, 1/ba)
-        return gal['SERSIC_BA'].iloc[0], ba
-    except KeyError as e:
-        print(e)
-        print(disk_clustering_result)
+    bas = []
+    gzb_ax_ratios = {}
+    nsa_ax_ratios = []
+    for subject_id in np.loadtxt('lib/subject-id-list.csv', dtype='u8'):
+        classifications_for_subject = [
+            c for c in classifications
+            if c['links']['subjects'][0] == str(subject_id)
+        ]
+        annotations_for_subject = [i['annotations'] for i in classifications_for_subject]
+        drawn_disks = [
+            a[0]['value'][0]['value'][0]
+            for a in annotations_for_subject
+            if len(a) == 4 and len(a[0]['value'][0]['value']) > 0
+        ]
+
+        # get ax ratio for each disk drawn for this galaxy
+        ax_ratios = [min(j, 1/j) for j in (i['rx'] / i['ry'] for i in drawn_disks)]
+        ax_ratios = [i for i in ax_ratios if i != 0.5]
+        gzb_ax_ratios[subject_id] = ax_ratios
+
+        metadata = gu.meta_map.get(int(subject_id), {})
+        NSAID = metadata.get('NSA id', False)
+        if NSAID is not False:
+            galaxy = gu.df_nsa[gu.df_nsa['NSAID'] == int(NSAID)]
+            nsa_ax_ratio = galaxy['PETRO_BA90']
+
+            nsa_ax_ratios.append([subject_id, nsa_ax_ratio])
+    nsa_ax_ratios = np.array(nsa_ax_ratios)
+
+    sid_by_ax = nsa_ax_ratios[:, 0][np.argsort(nsa_ax_ratios[:, 1])]
+
+    plt.figure(figsize=(20, 10))
+    plt.boxplot([gzb_ax_ratios[i] for i in sid_by_ax])
+    x = range(1, len(sid_by_ax) + 1)
+    plt.plot(x, np.sort(nsa_ax_ratios[:, 1]), 'x')
+    plt.xlabel('Zooniverse Subject ID')
+    plt.ylabel('Axis ratio')
+    plt.xticks(x, list(map(int, sid_by_ax)), rotation=90)
+    plt.savefig('GZBvsNSA_ax-ratio_boxplot', bbox_inches='tight')
+
+
+def compare_clustered_disk():
+    data = []
+    for componentFile in os.listdir('./cluster-output'):
+        if not '.json' in componentFile:
+            continue
+        metadata = gu.meta_map.get(int(componentFile.split('.json')[0]), {})
+        NSAID = metadata.get('NSA id', False)
+        if NSAID is not False:
+            galaxy = gu.df_nsa[gu.df_nsa['NSAID'] == int(NSAID)]
+            nsa_ax_ratio = galaxy['PETRO_BA90']
+
+            with open('./cluster-output/{}'.format(componentFile)) as f:
+                components = json.load(f)
+            if components.get('disk').get('rx', False):
+                gzb_ax_ratio = components['disk']['rx'] / components['disk']['ry']
+                gzb_ax_ratio = min(gzb_ax_ratio, 1/gzb_ax_ratio)
+                data.append([nsa_ax_ratio, gzb_ax_ratio])
+    data = np.array(data)
+    print(data.shape)
+    plt.scatter(*data.T)
+    plt.plot([0, 1], [0, 1], 'k', alpha=0.5)
+    plt.xlim(0, 1)
+    plt.ylim(0, 1)
+    plt.xlabel('Axis ratio from Stokes parameters at 90% light radius')
+    plt.ylabel('Axis ratio from Galaxy builder disk component')
+    plt.savefig('GZBvsNSA_ax-ratio_P90', bbox_inches='tight')
 
 if __name__ == "__main__":
-    available_ids = np.loadtxt('lib/subject-id-list.csv')
-    out = [('Sersic ID', 'Sersic BA', 'GZB axis ratio')]
-    for id in available_ids:
-        bas = get_disk(int(id))
-        out.append([int(id), *bas])
-    with open('disk-axis-ratios.csv','w') as f:
-        f.write(','.join('"{}"'.format(s) for s in out[0]))
-        f.write('\n')
-        f.write('\n'.join(','.join(map(str,i)) for i in out[1:]))
+    # compare_all_classifications()
+    compare_clustered_disk()
