@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from shapely.geometry import LineString, MultiPoint
 from copy import copy
 from scipy.interpolate import splprep, splev
+from numba import jit
 # Many of these functions are copied and translated from
 # https://github.com/zooniverse/Panoptes-Front-End/blob/master/app/features/modelling/galaxy-builder
 # without optimization.
@@ -131,6 +132,31 @@ def spiral_distance_numpy(points, poly_line, output_shape=(256, 256)):
     ).reshape(*output_shape)
 
 
+@jit(nopython=True)
+def spiral_distance_numba(poly_line, output_shape=(250, 250)):
+    distances = np.zeros(output_shape)
+    for i in range(output_shape[0]):
+        for j in range(output_shape[1]):
+            best = 1E30
+            # for each possible pair of vertices
+            for k in range(len(poly_line) - 1):
+                ux = j - poly_line[k, 0]
+                uy = i - poly_line[k, 1]
+                vx = poly_line[k + 1, 0] - poly_line[k, 0]
+                vy = poly_line[k + 1, 1] - poly_line[k, 1]
+                dot = ux * vx + uy * vy
+                t = dot / (vx**2 + vy**2)
+                if t < 0.0:
+                    t = 0.0
+                elif t > 1.0:
+                    t = 1.0
+                d = (vx*t - ux)**2 + (vy*t - uy)**2
+                if d < best:
+                    best = d
+            distances[i, j] = best
+    return np.sqrt(distances)
+
+
 def spiral_arm(arm_points, params=default_spiral, disk=default_disk,
                image_size=512, point_list=None):
     if disk is None or len(arm_points) < 2:
@@ -140,8 +166,7 @@ def spiral_arm(arm_points, params=default_spiral, disk=default_disk,
 
     disk_arr = _sersic_comp({**disk, 'i0': 1}, cx, cy)
 
-    arm_distances = spiral_distance_shapely(
-        np.vstack((cx.ravel(), cy.ravel())).T,
+    arm_distances = spiral_distance_numba(
         arm_points,
         output_shape=disk_arr.shape
     )

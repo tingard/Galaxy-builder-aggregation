@@ -18,8 +18,6 @@ def numpy_squared_distance_to_point(P, poly_line):
     v = poly_line[1:] - poly_line[:-1]
     dot = u[:, 0] * v[:, 0] + u[:, 1] * v[:, 1]
     t = np.clip(dot / (v[:, 0]**2 + v[:, 1]**2), 0, 1)
-    # sep = (1.0 - t) * A + t*B - P
-    # sep = A - t*A + t*B - P
     # sep = t*(B - A) - (P - A)
     sep = (v.T * t).T - u
     return np.min(sep[:, 0]**2 + sep[:, 1]**2)
