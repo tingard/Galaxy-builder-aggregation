@@ -1,7 +1,7 @@
 # # Spiral extraction methodology
 #
-# 1. Obtain Sérsic parameters of galaxy from NSA catalog
-# 2. Translate the Sérsic $\phi$ into zooniverse image coordinates
+# 1. Obtain Sersic parameters of galaxy from NSA catalog
+# 2. Translate the Sersic $\phi$ into zooniverse image coordinates
 #     - Need to re-create the transforms used to generate the image for
 #       volunteers (due to poor decision making in the subject creation
 #       process)
@@ -67,6 +67,32 @@ metadata = [eval(i) for i in subjects['metadata'].values]
 meta_map = {i: j for i, j in zip(subjects['subject_id'].values, metadata)}
 annotations = np.array([eval(i) for i in classifications['annotations'].values], dtype=object)
 
+
+def get_fits_location(gal):
+    montagesDistanceMask = np.add.reduce(
+        (montageCoordinates - [gal['RA'].iloc[0], gal['DEC'].iloc[0]])**2,
+        axis=1
+    ) < 0.01
+    if np.any(montagesDistanceMask):
+        __import__('warnings').warn('Using montaged image')
+        montageFolder = montages[
+            np.where(montagesDistanceMask)[0][0]
+        ]
+        fits_name = get_path('{}/{}/{}'.format(
+            'montageOutputs',
+            montageFolder,
+            'mosaic.fits'
+        ))
+    else:
+        fileTemplate = get_path('fitsImages/{0}/{1}/frame-r-{0:06d}-{1}-{2:04d}.fits')
+        fits_name = fileTemplate.format(
+            int(gal['RUN']),
+            int(gal['CAMCOL']),
+            int(gal['FIELD'])
+        )
+    return fits_name
+
+
 def get_galaxy_and_angle(id, imShape=(512, 512)):
     subjectId = id
 
@@ -91,28 +117,7 @@ def get_galaxy_and_angle(id, imShape=(512, 512)):
 
     # First, use a WCS object to obtain the rotation in pixel coordinates, as
     # would be obtained from `fitsFile[0].data`
-
-    montagesDistanceMask = np.add.reduce(
-        (montageCoordinates - [gal['RA'].iloc[0], gal['DEC'].iloc[0]])**2,
-        axis=1
-    ) < 0.01
-    if np.any(montagesDistanceMask):
-        __import__('warnings').warn('Using montaged image')
-        montageFolder = montages[
-            np.where(montagesDistanceMask)[0][0]
-        ]
-        fits_name = get_path('{}/{}/{}'.format(
-            'montageOutputs',
-            montageFolder,
-            'mosaic.fits'
-        ))
-    else:
-        fileTemplate = get_path('fitsImages/{0}/{1}/frame-r-{0:06d}-{1}-{2:04d}.fits')
-        fits_name = fileTemplate.format(
-            int(gal['RUN']),
-            int(gal['CAMCOL']),
-            int(gal['FIELD'])
-        )
+    fits_name = get_fits_location(gal)
     angle = dpj.get_angle(gal, fits_name, np.array(imShape)) % 180
     return gal, angle
 

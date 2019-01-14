@@ -20,7 +20,7 @@ def parse_sersic_comp(comp, size_diff=1):
         # zooniverse rotation is confusing
         'roll': np.deg2rad(roll),
         'rEff': max(
-            1e-4,
+            1e-5,
             major_axis * float(comp['value'][1]['value']) * size_diff
         ),
         'axRatio': major_axis / minor_axis,
@@ -59,7 +59,7 @@ def parse_spiral_comp(comp, size_diff=1):
         params = {
             'i0': float(arm['details'][0]['value']),
             'spread': float(arm['details'][1]['value']),
-            'falloff': float(comp['value'][1]['value']),
+            'falloff': max(float(comp['value'][1]['value']), 1E-5),
         }
         out.append((points, params))
     return out

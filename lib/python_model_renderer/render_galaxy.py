@@ -29,15 +29,18 @@ MODEL_COMPARISON_IMSHOW_KWARGS = {
 
 
 # image manipulation
+@jit(nopython=True)
 def asinh(px):
     return np.log(px + np.sqrt(1.0 + (px * px)))
 
 
+@jit(nopython=True)
 def asinh_stretch(px, i=0.6):
     return asinh(px / i) / asinh(i)
 
 
 # rendering functions
+@jit(nopython=True)
 def calc_boxy_ellipse_dist(x, y, mu, roll, rEff, axRatio, c):
     xPrime = x * np.cos(roll) \
         - y * np.sin(roll) + mu[0] \
@@ -47,20 +50,21 @@ def calc_boxy_ellipse_dist(x, y, mu, roll, rEff, axRatio, c):
         - mu[1] * np.cos(roll) - mu[0] * np.sin(roll)
     # return a scaled version of the radius (multiplier is chosen so svg tool
     # doesn't impact badly on shown model component)
-    multiplier = 3.0
-    return multiplier * np.sqrt(
+    return 3.0 * np.sqrt(
         np.power(axRatio / rEff, c) * np.power(np.abs(xPrime - mu[0]), c)
         + np.power(np.abs(yPrime - mu[1]), c) / np.power(rEff, c)
     )
 
 
+@jit(nopython=True)
 def _b(n):
     # from https://arxiv.org/abs/astro-ph/9911078
     return 2 * n - 1/3 + 4/405/n \
-        + 46/25515/n/n + 131/1148175/pow(n, 3) \
-        - 2194697/30690717750/pow(n, 4)
+        + 46/25515/n/n + 131/1148175/n**3 \
+        - 2194697/30690717750/n**4
 
 
+@jit(nopython=True)
 def sersic2d(x, y, mu, roll, rEff, axRatio, c, i0, n):
     # https://www.cambridge.org/core/services/aop-cambridge-core/content/view/S132335800000388X
     return 0.5 * i0 * np.exp(
@@ -80,18 +84,16 @@ def _sersic_comp(comp, x, y):
 def sersic_comp(comp, image_size=512, oversample_n=1):
     if comp is None:
         return np.zeros((image_size, image_size))
-    oversample_grid = np.meshgrid(
-        np.linspace(0, image_size, image_size*oversample_n),
-        np.linspace(0, image_size, image_size*oversample_n)
+    ds = np.linspace(
+        0.5/oversample_n - 0.5,
+        image_size - 0.5 - 0.5/oversample_n,
+        image_size*oversample_n
     )
+    cx, cy = np.meshgrid(ds, ds)
     return _sersic_comp(
-        comp,
-        *oversample_grid
+        comp, cx, cy,
     ).reshape(
-        image_size,
-        oversample_n,
-        image_size,
-        oversample_n,
+        image_size, oversample_n, image_size, oversample_n,
     ).mean(3).mean(1)
 
 
@@ -111,9 +113,6 @@ def numpy_squared_distance_to_point(P, poly_line):
     v = poly_line[1:] - poly_line[:-1]
     dot = u[:, 0] * v[:, 0] + u[:, 1] * v[:, 1]
     t = np.clip(dot / (v[:, 0]**2 + v[:, 1]**2), 0, 1)
-    # sep = (1.0 - t) * A + t*B - P
-    # sep = A - t*A + t*B - P
-    # sep = t*(B - A) - (P - A)
     sep = (v.T * t).T - u
     return np.min(sep[:, 0]**2 + sep[:, 1]**2)
 
@@ -132,7 +131,7 @@ def spiral_distance_numpy(points, poly_line, output_shape=(256, 256)):
     ).reshape(*output_shape)
 
 
-@jit(nopython=True)
+@jit(nopython=True, fastmath=True)
 def spiral_distance_numba(poly_line, output_shape=(250, 250)):
     distances = np.zeros(output_shape)
     for i in range(output_shape[0]):
@@ -164,7 +163,10 @@ def spiral_arm(arm_points, params=default_spiral, disk=default_disk,
 
     cx, cy = np.meshgrid(np.arange(image_size), np.arange(image_size))
 
-    disk_arr = _sersic_comp({**disk, 'i0': 1}, cx, cy)
+    disk_arr = _sersic_comp(
+        {**disk, 'i0': 1, 'rEff': disk['rEff'] / params['falloff']},
+        cx, cy
+    )
 
     arm_distances = spiral_distance_numba(
         arm_points,
@@ -178,7 +180,7 @@ def spiral_arm(arm_points, params=default_spiral, disk=default_disk,
     )
 
 
-def render_galaxy(parsed_annotation, image_size, oversample_n=5,
+def calculate_model(parsed_annotation, image_size, oversample_n=5,
                   point_list=None):
     disk_arr = sersic_comp(parsed_annotation['disk'],
                            image_size=image_size,
