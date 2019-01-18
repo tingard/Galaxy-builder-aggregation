@@ -52,32 +52,41 @@ def compare_all_classifications():
 
 
 def compare_clustered_disk():
-    data = []
-    for componentFile in os.listdir('./cluster-output'):
-        if not '.json' in componentFile:
-            continue
-        metadata = gu.meta_map.get(int(componentFile.split('.json')[0]), {})
-        NSAID = metadata.get('NSA id', False)
-        if NSAID is not False:
-            galaxy = gu.df_nsa[gu.df_nsa['NSAID'] == int(NSAID)]
-            nsa_ax_ratio = galaxy['PETRO_BA90']
+    keys = ('PETRO_BA90', 'PETRO_BA50', 'SERSIC_BA')
+    ax_labels = (
+        'Axis ratio from Stokes parameters at 90% light radius',
+        'Axis ratio from Stokes parameters at 50% light radius',
+        'Axis ratio from 2D Sérsic fit',
+    )
+    plt.figure()
+    for key, ax_label in zip(keys, ax_labels):
+        data = []
+        for componentFile in os.listdir('./cluster-output'):
+            if not '.json' in componentFile:
+                continue
+            metadata = gu.meta_map.get(int(componentFile.split('.json')[0]), {})
+            NSAID = metadata.get('NSA id', False)
+            if NSAID is not False:
+                galaxy = gu.df_nsa[gu.df_nsa['NSAID'] == int(NSAID)]
+                nsa_ax_ratio = galaxy[key]
 
-            with open('./cluster-output/{}'.format(componentFile)) as f:
-                components = json.load(f)
-            if components.get('disk').get('rx', False):
-                gzb_ax_ratio = components['disk']['rx'] / components['disk']['ry']
-                gzb_ax_ratio = min(gzb_ax_ratio, 1/gzb_ax_ratio)
-                data.append([nsa_ax_ratio, gzb_ax_ratio])
-    data = np.array(data)
-    print(data.shape)
-    plt.scatter(*data.T)
-    plt.plot([0, 1], [0, 1], 'k', alpha=0.5)
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
-    plt.xlabel('Axis ratio from Stokes parameters at 90% light radius')
-    plt.ylabel('Axis ratio from Galaxy builder disk component')
-    plt.savefig('GZBvsNSA_ax-ratio_P90', bbox_inches='tight')
+                with open('./cluster-output/{}'.format(componentFile)) as f:
+                    components = json.load(f)
+                if components.get('disk').get('rx', False):
+                    gzb_ax_ratio = components['disk']['rx'] / components['disk']['ry']
+                    gzb_ax_ratio = min(gzb_ax_ratio, 1/gzb_ax_ratio)
+                    data.append([nsa_ax_ratio, gzb_ax_ratio])
+        data = np.array(data)
+        plt.scatter(*data.T)
+        plt.plot([0, 1], [0, 1], 'k', alpha=0.5)
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.xlabel(ax_label)
+        plt.ylabel('Axis ratio from Galaxy builder disk component')
+        plt.savefig('GZBvsNSA_ax-ratio_{}'.format(key), bbox_inches='tight')
+        plt.clf()
+
 
 if __name__ == "__main__":
-    # compare_all_classifications()
+    compare_all_classifications()
     compare_clustered_disk()

@@ -11,28 +11,33 @@ import lib.galaxy_utilities as gu
 import wrangle_classifications as wc
 
 DISK_EPS = 0.3
-BULGE_EPS = 0.3
-BAR_EPS = 0.4
+DISK_MIN_SAMPLES = 8
+BULGE_EPS = 0.4
+BULGE_MIN_SAMPLES = 5
+BAR_EPS = 0.5
+BAR_MIN_SAMPLES = 4
 
 with open('tmp_cls_dump.json') as f:
     classifications = json.load(f)
 
 
-def cluster_disks(drawn_disks, eps=DISK_EPS):
+def cluster_disks(drawn_disks, eps=DISK_EPS, min_samples=DISK_MIN_SAMPLES):
     if len(drawn_disks) == 0:
-        print('No drawn disks, aborting')
+        print('No drawn disks')
         return None, None, None
     disk_geoms = np.array([
         wc.ellipse_geom_from_zoo(d['value'][0]['value'][0])
         for d in drawn_disks
     ])
     disk_distances = wc.gen_jaccard_distances(disk_geoms)
-    clf_disk = DBSCAN(eps=eps, metric='precomputed')
+    clf_disk = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
     clf_disk.fit(disk_distances)
     disk_labels = clf_disk.labels_
+    if len(np.unique(disk_labels)) > 2:
+        print('Multiple ({}) clusters found'.format(len(np.unique(disk_labels))))
     clustered_disks = [d['value'][0]['value'][0] for d in np.array(drawn_disks)[disk_labels == 0]]
     if len(clustered_disks) == 0:
-        print('No disk cluster, aborting')
+        print('No disk cluster')
         return disk_geoms, None, None
     mean_disk = {}
     mean_disk['x'] = np.mean([i['x'] for i in clustered_disks])
@@ -49,21 +54,23 @@ def cluster_disks(drawn_disks, eps=DISK_EPS):
     return disk_geoms, mean_disk, mean_disk_geom
 
 
-def cluster_bulges(drawn_bulges, eps=BULGE_EPS):
+def cluster_bulges(drawn_bulges, eps=BULGE_EPS, min_samples=BULGE_MIN_SAMPLES):
     if len(drawn_bulges) == 0:
-        print('No drawn bulges, aborting')
+        print('No drawn bulges')
         return None, None, None
     bulge_geoms = np.array([
         wc.ellipse_geom_from_zoo(b['value'][0]['value'][0])
         for b in drawn_bulges
     ])
     bulge_distances = wc.gen_jaccard_distances(bulge_geoms)
-    clf_bulge = DBSCAN(eps=eps, metric='precomputed')
+    clf_bulge = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
     clf_bulge.fit(bulge_distances)
     bulge_labels = clf_bulge.labels_
+    if len(np.unique(bulge_labels)) > 2:
+        print('Multiple ({}) clusters found'.format(len(np.unique(bulge_labels))))
     clustered_bulges = [b['value'][0]['value'][0] for b in np.array(drawn_bulges)[bulge_labels == 0]]
     if len(clustered_bulges) == 0:
-        print('No bulge cluster, aborting')
+        print('No bulge cluster')
         return bulge_geoms, None, None
     mean_bulge = {}
     mean_bulge['x'] = np.mean([i['x'] for i in clustered_bulges])
@@ -79,9 +86,9 @@ def cluster_bulges(drawn_bulges, eps=BULGE_EPS):
     return bulge_geoms, mean_bulge, mean_bulge_geom
 
 
-def cluster_bars(drawn_bars, eps=BAR_EPS):
+def cluster_bars(drawn_bars, eps=BAR_EPS, min_samples=BAR_MIN_SAMPLES):
     if len(drawn_bars) == 0:
-        print('No drawn bars, aborting')
+        print('No drawn bars')
         return None, None, None
 
     bar_geoms = np.array([
@@ -89,9 +96,11 @@ def cluster_bars(drawn_bars, eps=BAR_EPS):
         for b in drawn_bars
     ])
     bar_distances = wc.gen_jaccard_distances(bar_geoms)
-    clf_bar = DBSCAN(eps=eps, metric='precomputed')
+    clf_bar = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
     clf_bar.fit(bar_distances)
     bar_labels = clf_bar.labels_
+    if len(np.unique(bar_labels)) > 2:
+        print('Multiple ({}) clusters found'.format(len(np.unique(bar_labels))))
     clustered_bars = [b['value'][0]['value'][0] for b in np.array(drawn_bars)[bar_labels == 0]]
 
     if len(clustered_bars) == 0:
