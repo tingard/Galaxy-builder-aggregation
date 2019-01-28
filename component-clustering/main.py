@@ -20,7 +20,7 @@ BAR_MIN_SAMPLES = 4
 
 def cluster_disks(drawn_disks, eps=DISK_EPS, min_samples=DISK_MIN_SAMPLES):
     if len(drawn_disks) == 0:
-        print('No drawn disks')
+        print('\tNo drawn disks')
         return None, None, None
     disk_geoms = np.array([
         wc.ellipse_geom_from_zoo(d['value'][0]['value'][0])
@@ -31,10 +31,10 @@ def cluster_disks(drawn_disks, eps=DISK_EPS, min_samples=DISK_MIN_SAMPLES):
     clf_disk.fit(disk_distances)
     disk_labels = clf_disk.labels_
     if len(np.unique(disk_labels)) > 2:
-        print('Multiple ({}) clusters found'.format(len(np.unique(disk_labels))))
+        print('\tMultiple ({}) disk clusters found'.format(len(np.unique(disk_labels))))
     clustered_disks = [d['value'][0]['value'][0] for d in np.array(drawn_disks)[disk_labels == 0]]
     if len(clustered_disks) == 0:
-        print('No disk cluster')
+        print('\tNo disk cluster')
         return disk_geoms, None, None
     mean_disk = {}
     mean_disk['x'] = np.mean([i['x'] for i in clustered_disks])
@@ -51,9 +51,36 @@ def cluster_disks(drawn_disks, eps=DISK_EPS, min_samples=DISK_MIN_SAMPLES):
     return disk_geoms, mean_disk, mean_disk_geom
 
 
+def get_bulge_from_cluster(drawn_bulges, bulge_labels):
+    if np.max(bulge_labels) < 0:
+        return None, None
+    areas, bulges = [], []
+    for cluster_label in range(np.max(bulge_labels) + 1):
+        clustered_bulges = [
+            b['value'][0]['value'][0]
+            for b in np.array(drawn_bulges)[
+                bulge_labels == cluster_label
+            ]
+        ]
+        mean_bulge = {}
+        mean_bulge['x'] = np.mean([i['x'] for i in clustered_bulges])
+        mean_bulge['y'] = np.mean([i['y'] for i in clustered_bulges])
+        mean_bulge['rx'] = np.mean([max(i['rx'], i['ry']) for i in clustered_bulges])
+        mean_bulge['ry'] = np.mean([min(i['rx'], i['ry']) for i in clustered_bulges])
+        bulge_angles = [
+            i['angle'] if i['rx'] > i['ry'] else (i['angle'] + 90)
+            for i in clustered_bulges
+        ]
+        mean_bulge['angle'] = avg_angle(bulge_angles, factor=2)
+        mean_bulge_geom = wc.ellipse_geom_from_zoo(mean_bulge)
+        areas.append(mean_bulge_geom.area)
+        bulges.append((mean_bulge, mean_bulge_geom))
+    return bulges.pop(np.argmin(areas))
+
+
 def cluster_bulges(drawn_bulges, eps=BULGE_EPS, min_samples=BULGE_MIN_SAMPLES):
     if len(drawn_bulges) == 0:
-        print('No drawn bulges')
+        print('\tNo drawn bulges')
         return None, None, None
     bulge_geoms = np.array([
         wc.ellipse_geom_from_zoo(b['value'][0]['value'][0])
@@ -63,29 +90,20 @@ def cluster_bulges(drawn_bulges, eps=BULGE_EPS, min_samples=BULGE_MIN_SAMPLES):
     clf_bulge = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
     clf_bulge.fit(bulge_distances)
     bulge_labels = clf_bulge.labels_
-    if len(np.unique(bulge_labels)) > 2:
-        print('Multiple ({}) clusters found'.format(len(np.unique(bulge_labels))))
-    clustered_bulges = [b['value'][0]['value'][0] for b in np.array(drawn_bulges)[bulge_labels == 0]]
-    if len(clustered_bulges) == 0:
-        print('No bulge cluster')
-        return bulge_geoms, None, None
     mean_bulge = {}
-    mean_bulge['x'] = np.mean([i['x'] for i in clustered_bulges])
-    mean_bulge['y'] = np.mean([i['y'] for i in clustered_bulges])
-    mean_bulge['rx'] = np.mean([max(i['rx'], i['ry']) for i in clustered_bulges])
-    mean_bulge['ry'] = np.mean([min(i['rx'], i['ry']) for i in clustered_bulges])
-    bulge_angles = [
-        i['angle'] if i['rx'] > i['ry'] else (i['angle'] + 90)
-        for i in clustered_bulges
-    ]
-    mean_bulge['angle'] = avg_angle(bulge_angles, factor=2)
-    mean_bulge_geom = wc.ellipse_geom_from_zoo(mean_bulge)
+    if len(np.unique(bulge_labels)) > 2:
+        print('\tMultiple ({}) bulge clusters found'.format(len(np.unique(bulge_labels))))
+
+    mean_bulge, mean_bulge_geom = get_bulge_from_cluster(drawn_bulges, bulge_labels)
+
+    if mean_bulge is None:
+        print('\tNo bulge cluster')
     return bulge_geoms, mean_bulge, mean_bulge_geom
 
 
 def cluster_bars(drawn_bars, eps=BAR_EPS, min_samples=BAR_MIN_SAMPLES):
     if len(drawn_bars) == 0:
-        print('No drawn bars')
+        print('\tNo drawn bars')
         return None, None, None
 
     bar_geoms = np.array([
@@ -97,11 +115,11 @@ def cluster_bars(drawn_bars, eps=BAR_EPS, min_samples=BAR_MIN_SAMPLES):
     clf_bar.fit(bar_distances)
     bar_labels = clf_bar.labels_
     if len(np.unique(bar_labels)) > 2:
-        print('Multiple ({}) clusters found'.format(len(np.unique(bar_labels))))
+        print('\tMultiple ({}) bar clusters found'.format(len(np.unique(bar_labels))))
     clustered_bars = [b['value'][0]['value'][0] for b in np.array(drawn_bars)[bar_labels == 0]]
 
     if len(clustered_bars) == 0:
-        print('No bar cluster, aborting')
+        print('\tNo bar cluster')
         return bar_geoms, None, None
     center_xs = [i['x'] + i['width']/2 for i in clustered_bars]
     center_ys = [i['y'] + i['height']/2 for i in clustered_bars]
@@ -142,13 +160,24 @@ def cluster_components(subject_id):
     drawn_bulges = [i for i in bulges if len(i['value'][0]['value']) > 0]
     drawn_bars = [i for i in bars if len(i['value'][0]['value']) > 0]
 
-    print('Found {} disks, {} bulges and {} bars'.format(
+    print('\tFound {} disks, {} bulges and {} bars'.format(
         *map(len, (drawn_disks, drawn_bulges, drawn_bars)))
     )
 
     disk_geoms, mean_disk, mean_disk_geom = cluster_disks(drawn_disks)
     bulge_geoms, mean_bulge, mean_bulge_geom = cluster_bulges(drawn_bulges)
     bar_geoms, mean_bar, mean_bar_geom = cluster_bars(drawn_bars)
+
+    # Small checks to test if we have a physical result
+    try:
+        if mean_bar_geom.area / mean_disk_geom.area > 0.5:
+            print('\tAggregate bar too large relative to disk, ignoring')
+            mean_bar = None
+        if mean_bulge_geom.intersection(mean_bar_geom).area / mean_bulge_geom.union(mean_bar_geom).area > 0.9:
+            print('\tBulge and bar very similar for {}'.format(subject_id))
+    except AttributeError:
+        # one of the components is already None
+        pass
 
     with open('cluster-output/{}.json'.format(subject_id), 'w') as f:
         json.dump({'disk': mean_disk, 'bulge': mean_bulge, 'bar': mean_bar}, f)

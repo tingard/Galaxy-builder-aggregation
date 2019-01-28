@@ -5,7 +5,7 @@ import lib.galaxy_utilities as gu
 from astropy.io import fits
 
 
-def get_bulge_fraction(gal):
+def get_pbulge(gal):
     none = gal['t05_bulge_prominence_a10_no_bulge_debiased'],
     just = gal['t05_bulge_prominence_a11_just_noticeable_debiased'],
     obvious = gal['t05_bulge_prominence_a12_obvious_debiased'],
@@ -13,7 +13,7 @@ def get_bulge_fraction(gal):
     return none + just < obvious + dominant
 
 
-def get_bar_fraction(gal):
+def get_pbar(gal):
     n = gal['t03_bar_a06_bar_debiased'] + gal['t03_bar_a07_no_bar_debiased']
     return gal['t03_bar_a06_bar_debiased'] / n
 
@@ -25,7 +25,6 @@ with open('tmp_cls_dump.json') as f:
 NSA_GZ = fits.open('./lib/NSA_GalaxyZoo.fits')
 
 available_sids = pd.read_csv('lib/subject-id-list.csv').values[:, 0]
-
 bulge_fractions = []
 bar_fractions = []
 bar_lengths = []
@@ -41,61 +40,63 @@ for subject_id in available_sids:
         print('Could not find object for id {}'.format(metadata['SDSS dr7 id']))
         bulge_fractions.append((np.nan, np.nan))
         bar_fractions.append((np.nan, np.nan))
-        continue
-    # how frequently do people draw bulges?
-    has_bulge = []
-    for c in cls_for_s:
-        try:
-            has_bulge.append(len(c['annotations'][1]['value'][0]['value']))
-        except IndexError:
-            pass
+    else:
+        # how frequently do people draw bulges?
+        has_bulge = []
+        for c in cls_for_s:
+            try:
+                has_bulge.append(len(c['annotations'][1]['value'][0]['value']))
+            except IndexError:
+                pass
 
-    gz2_bulge = get_bulge_fraction(gal)[0]
-    bulge_fractions.append((sum(has_bulge) / len(has_bulge), gz2_bulge))
+        gz2_bulge = get_pbulge(gal[0])
+        bulge_fractions.append((sum(has_bulge) / len(has_bulge), gz2_bulge))
 
-    # and onto the bars
-    has_bar = []
-    for c in cls_for_s:
-        try:
-            has_bar.append(len(c['annotations'][2]['value'][0]['value']))
-        except IndexError:
-            pass
-    gz2_bar = get_bar_fraction(gal)[0]
-    bar_fractions.append((sum(has_bar) / len(has_bar), gz2_bar))
+        # and onto the bars
+        has_bar = []
+        for c in cls_for_s:
+            try:
+                has_bar.append(len(c['annotations'][2]['value'][0]['value']))
+            except IndexError:
+                pass
+        gz2_pbar = get_pbar(gal[0])
+        bar_fractions.append((sum(has_bar) / len(has_bar), gz2_pbar))
 
-    bar_fraction = get_bar_fraction(gal[0])
     with open('cluster-output/{}.json'.format(subject_id)) as f:
         model = json.load(f)
     if model['bar'] is not None:
         bar_length = model['bar']['width']
-        bar_lengths.append((subject_id, bar_length))
     else:
         bar_length = np.nan
-    bar_lengths.append((subject_id, bar_length))
+    bar_lengths.append(bar_length)
 
-
+len(available_sids), len(bulge_fractions), len(bar_fractions), len(bar_lengths)
 bulge_df = pd.DataFrame(
     bulge_fractions,
-    columns=('GZB fraction', 'GZ2 bulge dominated'), index=available_sids,
-).dropna()
+    columns=('GZB fraction', 'GZ2 bulge dominated'),
+    index=pd.Series(available_sids, name='subject_id'),
+)
 bulge_df.to_pickle('bulge_fractions.pkl')
 
 
 bar_df = pd.DataFrame(
     bar_fractions,
-    columns=('GZB fraction', 'GZ2 bar fraction'), index=available_sids
-).dropna()
+    columns=('GZB fraction', 'GZ2 bar fraction'),
+    index=pd.Series(available_sids, name='subject_id'),
+)
 bar_df['Strongly barred'] = bar_df['GZ2 bar fraction'] > 0.5
 bar_df['No bar'] = bar_df['GZ2 bar fraction'] < 0.2
 bar_df.to_pickle('bar_fractions.pkl')
 
-
+bar_lengths
 bar_length_df = pd.DataFrame(
     bar_lengths,
-    columns=('subject_id', 'GZB bar length')
-).set_index('subject_id')
-bar_length_df['GZ2 bar fraction'] = (
-    bar_df['GZ2 bar fraction'][bar_length_df.index]
+    columns=('GZB bar length',),
+    index=pd.Series(available_sids, name='subject_id'),
 )
-bar_length_df['GZB fraction'] = bar_df['GZB fraction'][bar_length_df.index]
+bar_length_df.head()
+bar_length_df['GZ2 bar fraction'] = (
+    bar_df['GZ2 bar fraction']
+)
+bar_length_df['GZB fraction'] = bar_df['GZB fraction']
 bar_length_df.to_pickle('bar_lengths.pkl')
