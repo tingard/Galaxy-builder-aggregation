@@ -17,9 +17,6 @@ BULGE_MIN_SAMPLES = 5
 BAR_EPS = 0.5
 BAR_MIN_SAMPLES = 4
 
-with open('tmp_cls_dump.json') as f:
-    classifications = json.load(f)
-
 
 def cluster_disks(drawn_disks, eps=DISK_EPS, min_samples=DISK_MIN_SAMPLES):
     if len(drawn_disks) == 0:
@@ -127,17 +124,14 @@ def cluster_bars(drawn_bars, eps=BAR_EPS, min_samples=BAR_MIN_SAMPLES):
 
 def cluster_components(subject_id):
     print('Working on subject', subject_id)
-    classifications_for_subject = [
-        c for c in classifications
-        if c['links']['subjects'][0] == str(subject_id)
+
+    classifications_for_subject = gu.classifications[
+        gu.classifications['subject_ids'] == subject_id
     ]
-    annotations_for_subject = [i['annotations'] for i in classifications_for_subject]
-    # classifications = gu.classifications
-    # classifications_for_subject = classifications['subject_ids'] == subject_id
-    # annotations_for_subject = [
-    #     eval(foo) for foo in
-    #     classifications_for_subject
-    # ]
+    annotations_for_subject = [
+        json.loads(foo) for foo in
+        classifications_for_subject['annotations'].values
+    ]
 
     # Exctract annotations
     disks = [a[0] for a in annotations_for_subject if len(a) == 4]
@@ -176,7 +170,9 @@ def get_log_spirals(subject_id, gal=None, angle=None, pic_array=None):
         distances = np.load(
             './lib/distances/subject-{}.npy'.format(subject_id)
         )
-    else:
+    if (distances.shape[0] != len(drawn_arms)
+        or not os.path.exists('./lib/distances/subject-{}.npy'.format(subject_id))
+    ):
         print('\t- Calculating distances')
         distances = metric.calculate_distance_matrix(drawn_arms)
         np.save('./lib/distances/subject-{}.npy'.format(subject_id), distances)

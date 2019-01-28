@@ -28,6 +28,11 @@ from gzbuilderspirals import deprojecting as dpj
 from shapely.geometry import box, Point
 from shapely.affinity import rotate as shapely_rotate, scale as shapely_scale
 
+# for when we eval the json
+null = None
+true = True
+false = False
+
 
 # needed as we want to load files relative to this file's location, not the
 # current working directory
@@ -40,14 +45,12 @@ def get_path(s):
 df_nsa = pd.read_pickle(get_path('df_nsa.pkl'))
 
 classifications = pd.read_csv(
-    get_path('../classifications/galaxy-builder-classifications_15-11-18.csv')
+    get_path('../classifications/galaxy-builder-classifications_24-1-19.csv')
 )
+
 subjects = pd.read_csv(
-    get_path('../classifications/galaxy-builder-subjects_24-7-18.csv')
+    get_path('../classifications/galaxy-builder-subjects_24-1-19.csv')
 )
-null = None
-true = True
-false = False
 
 # Some galaxies were montaged when created. Create a list of their coordinates
 # for use later
@@ -60,12 +63,8 @@ montageCoordinates = np.array([
     for i in [f for f in os.listdir(montage_output_path) if not f[0] == '.']
 ])
 
-true = True
-false = False
-null = None
 metadata = [eval(i) for i in subjects['metadata'].values]
 meta_map = {i: j for i, j in zip(subjects['subject_id'].values, metadata)}
-annotations = np.array([eval(i) for i in classifications['annotations'].values], dtype=object)
 
 
 def get_fits_location(gal):
@@ -74,7 +73,7 @@ def get_fits_location(gal):
         axis=1
     ) < 0.01
     if np.any(montagesDistanceMask):
-        __import__('warnings').warn('Using montaged image')
+        # __import__('warnings').warn('Using montaged image')
         montageFolder = montages[
             np.where(montagesDistanceMask)[0][0]
         ]

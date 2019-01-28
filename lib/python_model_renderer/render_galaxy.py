@@ -207,7 +207,7 @@ def calculate_model(parsed_annotation, image_size, oversample_n=5,
 
 def compare_to_galaxy(arr, psf, galaxy):
     return asinh_stretch(
-        galaxy - convolve2d(arr, psf, mode='same', boundary='symm')
+        0.8 * galaxy - convolve2d(arr, psf, mode='same', boundary='symm')
     )
 
 

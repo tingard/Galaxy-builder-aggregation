@@ -14,31 +14,30 @@ pic_array, deprojected_image = gu.get_image(gal, subject_id, angle)
 
 psf = gu.get_psf(subject_id)
 diff_data = gu.get_image_data(subject_id)
-galaxy_data = np.array(diff_data['imageData'])[::-1]
+galaxy_data = 0.8 * np.array(diff_data['imageData'])[::-1]
 image_size = galaxy_data.shape[0]
 oversample_n = 3
 
 size_diff = diff_data['width'] / diff_data['imageWidth']
-pix_size = pic_array.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4) # arcseconds per pixel for zooniverse image
-pix_size2 = galaxy_data.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4) # arcseconds per pixel for galaxy data
+
+# arcseconds per pixel for zooniverse image
+pix_size = pic_array.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4)
+
+# arcseconds per pixel for galaxy data
+pix_size2 = galaxy_data.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4)
+
 
 def transform_coords(c):
-    return (c - galaxy_data.shape[0] /2) / pix_size2
+    return (c - galaxy_data.shape[0] / 2) / pix_size2
 
-def transform_patch(p):
-    return scale(
-        translate(p, xoff=-pic_array.shape[0]/2, yoff=-pic_array.shape[1]/2),
-        xfact=1/pix_size,
-        yfact=1/pix_size,
-        origin=(0, 0),
-    )
+
 imshow_kwargs = {
     'cmap': 'gray_r', 'origin': 'lower',
     'extent': (
-        -pic_array.shape[0]/2 / pix_size, # left of image in arcseconds from centre
-        pic_array.shape[0]/2 / pix_size, # right...
-        -pic_array.shape[1]/2 / pix_size, # bottom...
-        pic_array.shape[1]/2 / pix_size # top...
+        -pic_array.shape[0]/2 / pix_size,  # left of image, arcsec from center
+        pic_array.shape[0]/2 / pix_size,  # right...
+        -pic_array.shape[1]/2 / pix_size,  # bottom...
+        pic_array.shape[1]/2 / pix_size  # top...
     ),
 }
 
@@ -61,18 +60,22 @@ def load_data():
 
 param_list = ('i0', 'rEff', 'n', 'c')
 param_bounds = ((0, 0, 0.1, 1), (100, 500, 4, 8))
+
+
 def _fit_to_leftovers(p, an, rest_of_model, galaxy_data, psf,
                       image_size=image_size, oversample_n=oversample_n):
     new_annotation = {**an, **{param_list[i]: p[i] for i in range(len(p))}}
     new_comp = rg.sersic_comp(new_annotation,
                               image_size=image_size,
                               oversample_n=oversample_n)
-    model = rg.convolve2d(rest_of_model + new_comp, psf, mode='same', boundary='symm')
+    model = rg.convolve2d(rest_of_model + new_comp, psf,
+                          mode='same', boundary='symm')
     return (model - galaxy_data).reshape(-1)
 
 
 def fit_comp(annotation, rest_of_model, galaxy_data, psf,
-             image_size=image_size, oversample_n=oversample_n, c_to_fit=('i0', 'rEff')):
+             image_size=image_size, oversample_n=oversample_n,
+             c_to_fit=('i0', 'rEff')):
     p0 = [annotation[i] for i in param_list if i in c_to_fit]
     res = least_squares(
         _fit_to_leftovers,
@@ -85,14 +88,18 @@ def fit_comp(annotation, rest_of_model, galaxy_data, psf,
 
 spiral_params = ('i0', 'spread', 'falloff')
 spiral_bounds = ((0, 0, 0.2), (1E4, 1E2, 1E5))
+
+
 def _fit_spiral_to_leftovers(p, an, disk, rest_of_model, galaxy_data, psf):
     points = an[0]
-    new_annotation = {**an[1], **{spiral_params[i]: p[i] for i in range(len(p))}}
+    new_annotation = {**an[1],
+                      **{spiral_params[i]: p[i] for i in range(len(p))}}
     new_comp = rg.spiral_arm(
         points, new_annotation, disk,
         image_size=image_size,
     )
-    model = rg.convolve2d(rest_of_model + new_comp, psf, mode='same', boundary='symm')
+    model = rg.convolve2d(rest_of_model + new_comp, psf, mode='same',
+                          boundary='symm')
     return (model - galaxy_data).reshape(-1)
 
 
@@ -117,12 +124,14 @@ def _fit_all(p, an, disk, rest_of_model, galaxy_data, psf):
     new_annotation = deepcopy(an)
     for k in ('disk', 'bulge', 'bar'):
         new_annotation
-    new_annotation = {**an[1], **{spiral_params[i]: p[i] for i in range(len(p))}}
+    new_annotation = {**an[1],
+                      **{spiral_params[i]: p[i] for i in range(len(p))}}
     new_comp = rg.spiral_arm(
-        points, new_annotation, disk,
+        p, new_annotation, disk,
         image_size=image_size,
     )
-    model = rg.convolve2d(rest_of_model + new_comp, psf, mode='same', boundary='symm')
+    model = rg.convolve2d(rest_of_model + new_comp, psf, mode='same',
+                          boundary='symm')
     return (model - galaxy_data).reshape(-1)
 
 
@@ -132,7 +141,11 @@ def fit_everything(annotation, galaxy_data, psf):
         [annotation['disk'][i] for i in param_list[:2]],
         [annotation['bulge'][i] for i in param_list[:3]],
         [annotation['bar'][i] for i in param_list],
-        [annotation['spiral'][i][1][k] for i in range(len(annotation['spiral'])) for k in spiral_params],
+        [
+            annotation['spiral'][i][1][k]
+            for i in range(len(annotation['spiral']))
+            for k in spiral_params
+        ],
     ))
     return p0
     pass
@@ -142,22 +155,25 @@ if __name__ == '__main__-':
     annotation = load_data()
     # render the model created by the volunteer
     disk = rg.sersic_comp(annotation['disk'],
-                           image_size=image_size,
-                           oversample_n=oversample_n)
+                          image_size=image_size,
+                          oversample_n=oversample_n)
     bulge = rg.sersic_comp(annotation['bulge'],
                            image_size=image_size,
                            oversample_n=oversample_n)
     bar = rg.sersic_comp(annotation['bar'],
-                           image_size=image_size,
-                           oversample_n=oversample_n)
+                         image_size=image_size,
+                         oversample_n=oversample_n)
     spiral_arms = np.add.reduce([
         rg.spiral_arm(*s, annotation['disk'], image_size=image_size)
         for s in annotation['spiral']
     ])
-    model = rg.convolve2d(disk + bulge + bar + spiral_arms, psf, mode='same', boundary='symm')
+    model = rg.convolve2d(disk + bulge + bar + spiral_arms, psf, mode='same',
+                          boundary='symm')
 
     # let's fine tune the disk parameters
-    new_disk_comps = fit_disk(annotation, galaxy_data - bulge + bar + spiral_arms)
+    rest_of_model = rg.convolve2d(bulge + bar + spiral_arms, psf, mode='same',
+                                  boundary='symm')
+    new_disk_comps = fit_comp(annotation, galaxy_data - rest_of_model)
     new_disk_annotation = {
         **annotation['disk'], 'i0': new_disk_comps['x'][0], 'rEff': new_disk_comps['x'][1]
     }

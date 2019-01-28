@@ -1,9 +1,10 @@
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import json
 import lib.galaxy_utilities as gu
+from sklearn.metrics import r2_score
+from scipy.stats import pearsonr
 
 
 def compare_all_classifications():
@@ -48,7 +49,8 @@ def compare_all_classifications():
     plt.xlabel('Zooniverse Subject ID')
     plt.ylabel('Axis ratio')
     plt.xticks(x, list(map(int, sid_by_ax)), rotation=90)
-    plt.savefig('GZBvsNSA_ax-ratio_boxplot', bbox_inches='tight')
+    plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_boxplot.pdf', bbox_inches='tight')
+    plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_boxplot.png', bbox_inches='tight')
 
 
 def compare_clustered_disk():
@@ -68,25 +70,33 @@ def compare_clustered_disk():
             NSAID = metadata.get('NSA id', False)
             if NSAID is not False:
                 galaxy = gu.df_nsa[gu.df_nsa['NSAID'] == int(NSAID)]
-                nsa_ax_ratio = galaxy[key]
+                nsa_ax_ratio = galaxy[key].values
 
                 with open('./cluster-output/{}'.format(componentFile)) as f:
                     components = json.load(f)
-                if components.get('disk').get('rx', False):
-                    gzb_ax_ratio = components['disk']['rx'] / components['disk']['ry']
-                    gzb_ax_ratio = min(gzb_ax_ratio, 1/gzb_ax_ratio)
-                    data.append([nsa_ax_ratio, gzb_ax_ratio])
-        data = np.array(data)
+                try:
+                    if components.get('disk', {}).get('rx', False):
+                        gzb_ax_ratio = components['disk']['rx'] / components['disk']['ry']
+                        gzb_ax_ratio = min(gzb_ax_ratio, 1/gzb_ax_ratio)
+                        data.append([nsa_ax_ratio, gzb_ax_ratio])
+                except AttributeError:
+                    print(componentFile, 'contained no disk')
+        data = np.array(data).astype(float)
+        np.save('tst.npy', data)
+        p_rho, p_p = pearsonr(data.T[0], data.T[1])
+        print('Probability samples are correlated: {:.8f}'.format(1-p_p))
         plt.scatter(*data.T)
-        plt.plot([0, 1], [0, 1], 'k', alpha=0.5)
+        plt.plot([0, 1], [0, 1], 'k', alpha=0.4)
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.xlabel(ax_label)
         plt.ylabel('Axis ratio from Galaxy builder disk component')
-        plt.savefig('GZBvsNSA_ax-ratio_{}'.format(key), bbox_inches='tight')
+        plt.title('Pearson correlation coefficient: {:.4f}'.format(p_rho))
+        plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_{}.pdf'.format(key), bbox_inches='tight')
+        plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_{}.png'.format(key), bbox_inches='tight')
         plt.clf()
 
 
 if __name__ == "__main__":
-    compare_all_classifications()
+    # compare_all_classifications()
     compare_clustered_disk()

@@ -32,29 +32,29 @@ P) 0                                                             # Choose: 0=opt
 
 
 0) sersic                         #  object type
-1) 114.47578213291649  127.43650064344808  0 0  #  position x, y
+1) 110.42001715565925  130.8496729940041  0 0  #  position x, y
 3) 20.0  1     #  Integrated magnitude
-4) 70.5500512785072       1          #  R_e (half-light radius)   [pix]
+4) 110.46771710744584       0          #  R_e (half-light radius)   [pix]
 5) 1          0             #  Sersic index n (de Vaucouleurs n=4)
 6) 0.0000      0                  #     -----
 7) 0.0000      0                  #     -----
 8) 0.0000      0                  #     -----
-9) 1.3925489200507362    0       #  axis ratio (b/a)
-10) 76.64465308301502      0          #  position angle (PA) [deg: Up=0, Left=90]
+9) 1.698565965656227    0       #  axis ratio (b/a)
+10) -70.8209919741893      0          #  position angle (PA) [deg: Up=0, Left=90]
 Z) 0                              #  output option (0 = resid., 1 = Don't subtract)
 
-
 0) sersic                         #  object type
-1) 107.67397926919796  129.20147771680337  0 0  #  position x, y
+1) 110.02797911153539  127.8265334589326  0 0  #  position x, y
 3) 20.0  1     #  Integrated magnitude
-4) 18.236367187499997       1          #  R_e (half-light radius)   [pix]
-5) 0.46          0             #  Sersic index n (de Vaucouleurs n=4)
+4) 11.635482288917082       0          #  R_e (half-light radius)   [pix]
+5) 0.78          0             #  Sersic index n (de Vaucouleurs n=4)
 6) 0.0000      0                  #     -----
 7) 0.0000      0                  #     -----
 8) 0.0000      0                  #     -----
-9) 1.3823523207934567    0       #  axis ratio (b/a)
-10) 90.0      0          #  position angle (PA) [deg: Up=0, Left=90]
+9) 1.9369367924460092    0       #  axis ratio (b/a)
+10) -59.03624346792648      0          #  position angle (PA) [deg: Up=0, Left=90]
 Z) 0                              #  output option (0 = resid., 1 = Don't subtract)
+
 
 
 

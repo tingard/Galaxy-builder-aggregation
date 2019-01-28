@@ -130,7 +130,7 @@ def main(id, shouldShowPoints=False):
     # We'll make use of the `gzbuilderspirals` class method to cluster arms.
     # First, initialise a `GalaxySpirals` object with the arms and deprojection
     # parameters
-    galaxy_object = GalaxySpirals(drawnArms, ba=gal['SERSIC_BA'].iloc[0], phi=-angle)
+    galaxy_object = GalaxySpirals(drawnArms, ba=gal['PETRO_BA90'].iloc[0], phi=-angle)
 
     # Now calculate a the distance matrix for the drawn arms (this can be slow)
     try:

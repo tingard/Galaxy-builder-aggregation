@@ -15,7 +15,7 @@ with open('./galfit_template.tpl') as f:
     galfit_formatter = string.Template(f.read())
 
 with open('./sersic_component_template.tpl') as f:
-    component_formatter = string.Template(f.read())
+    sersic_component_formatter = string.Template(f.read())
 
 
 def get_original_fits(frame):
@@ -26,38 +26,42 @@ def get_original_fits(frame):
 
 
 # TODO: as not using montaged image, positions need to change
-def create_object(component, original_wcs, cutout_wcs):
+def create_object(component, original_wcs, cutout_wcs,
+                  components_params={}, fitting_params={}):
     if component is None:
         return ''
     position_sky = original_wcs.all_pix2world(component['mu'][np.newaxis, :], 0)
     position_cutout = cutout_wcs.all_world2pix(position_sky, 0)
-    # print(component['mu'], '-> Ra, Dec:', position_sky, '->', position_cutout)
     components_params = {
         'mux': position_cutout[0][0],
         'muy': position_cutout[0][1],
-        'magnitude': 20.0, # np.sum(rg.sersic_comp(component, image_size=512, oversample_n=3)),
+        'magnitude': 20.0,  # TODO: how to get magnitude from model?
         'rEff': component['rEff'],
         'n': component['n'],
         'axRatio': component['axRatio'],
-        'roll': np.rad2deg(component['roll']),
+        'roll': -np.rad2deg(component['roll']),
+        'c': float(component['c']) - 2,
+        **components_params,
     }
     fitting_params = {
         'fit_mux': 0,
         'fit_muy': 0,
         'fit_magnitude': 1,
-        'fit_rEff': 1,
+        'fit_rEff': 0,
         'fit_n': 0,
         'fit_axRatio': 0,
         'fit_roll': 0,
+        'fit_c': 0,
+        **fitting_params,
     }
-    return component_formatter.substitute(**components_params, **fitting_params)
+    return sersic_component_formatter.substitute(**components_params, **fitting_params)
 
 
 def create_object_list(annotation, gal, original_wcs, cutout_wcs):
     # first the disk
     disk = create_object(annotation['disk'], original_wcs, cutout_wcs)
     bulge = create_object(annotation['bulge'], original_wcs, cutout_wcs)
-    bar = create_object(annotation['bar'], original_wcs, cutout_wcs)
+    bar = '' #create_object(annotation['bar'], original_wcs, cutout_wcs)
 
     return '\n' + '\n'.join((disk, bulge, bar)) + '\n'
 
@@ -106,7 +110,7 @@ def make_galfit_feedme(annotation, gal, size_diff=1, output_dir='', output_fname
 
     masked_cutout_loc = os.path.join(output_dir, 'masked_cutout.fits')
     fits.HDUList(
-        [fits.PrimaryHDU(cutout_file[0].data * segmentation_map)]
+        [fits.PrimaryHDU(cutout_file[0].data * (1 - segmentation_map))]
     ).writeto(masked_cutout_loc)
 
     bad_pixel_loc = os.path.join(output_dir, 'bad_pixel_image.fits')
@@ -137,9 +141,9 @@ def make_galfit_feedme(annotation, gal, size_diff=1, output_dir='', output_fname
         'region_xmax': cutout_file[0].data.shape[1],  # x is columns
         'region_ymin': 1,
         'region_ymax': cutout_file[0].data.shape[0],  # y is rows
-        'convolution_box_width': 100,
-        'convolution_box_height': 100,
-        'photomag_zero': 26.563,  # r-band photomag zero
+        'convolution_box_width': 100, # something magical in GALFIT
+        'convolution_box_height': 100, # something magical in GALFIT
+        'photomag_zero': 26.563,  # sdss r-band photomag zeropoint
         'plate_scale_dy': 0.396,  # arcseconds per pixel
         'plate_scale_dx': 0.396,
         'display_type': None,
@@ -176,7 +180,7 @@ def make_galfit_folder(subject_id, overwrite=True, base_path=''):
     galaxy_data = np.array(diff_data['imageData'])[::-1]
     size_diff = diff_data['width'] / diff_data['imageWidth']
     annotations = get_annotations(subject_id)
-    for i, annotation in enumerate(annotations[:1]):
+    for i, annotation in enumerate(annotations[12:13]):
         res = make_galfit_feedme(
             annotation, gal, size_diff,
             output_dir=loc, output_fname='output-annotation-{}.fits'.format(i)

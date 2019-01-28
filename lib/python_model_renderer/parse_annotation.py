@@ -77,3 +77,15 @@ def parse_annotation(annotation, size_diff=1):
         else:
             out[component['task']] = parse_sersic_comp(component, size_diff=size_diff)
     return out
+
+
+def make_json(parsed_annotation):
+    a = deepcopy(parsed_annotation)
+    a['disk']['mu'] = list(parsed_annotation['disk']['mu'])
+    a['bulge']['mu'] = list(parsed_annotation['bulge']['mu'])
+    a['bar']['mu'] = list(parsed_annotation['bar']['mu'])
+    a['spiral'] = [
+        [s[0].tolist(), s[1]]
+        for s in parsed_annotation['spiral']
+    ]
+    return a
