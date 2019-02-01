@@ -6,7 +6,7 @@ import pandas as pd
 import lib.galaxy_utilities as gu
 from astropy.io import fits
 from gzbuilderspirals import cleaning, pipeline, metric
-from gzbuilerspirals.oo import Pipeline
+from gzbuilderspirals.oo import Pipeline
 
 
 def hart_wavg(gal):
@@ -31,43 +31,37 @@ def get_gal_pa(subject_id):
     drawn_arms = gu.get_drawn_arms(subject_id, gu.classifications)
     gal, angle = gu.get_galaxy_and_angle(subject_id)
     pic_array, deprojected_image = gu.get_image(gal, subject_id, angle)
-    if os.path.exists('./lib/distances/subject-{}.npy'.format(subject_id)):
-        distances = np.load(
-            './lib/distances/subject-{}.npy'.format(subject_id)
-        )
-    else:
+    distances = gu.get_distances(subject_id)
+    if distances is None:
         print('\t- Calculating distances')
         distances = metric.calculate_distance_matrix(drawn_arms)
         np.save('./lib/distances/subject-{}.npy'.format(subject_id), distances)
 
-    p = Pipeline(drawn_arms, phi=phi, ba=ba, image_size=pic_array.shape[0],
+    p = Pipeline(drawn_arms, phi=angle, ba=gal['PETRO_BA90'], image_size=pic_array.shape[0],
                  distances=distances)
+    arms = [p.get_arm(i, clean_points=True) for i in range(max(p.db.labels_) + 1)]
 
-
-    gzb_pa = np.sum(pa * length) / length.sum()
-    combined_sigma_pa = np.sqrt(np.sum(length**2 * sigma_pa**2)) / length.sum()
-    # return combined_pa, combined_sigma_pa, np.stack((pa, sigma_pa, length), axis=1)
-
-    pa = np.zeros(np.max(p.db.labels_)+1)
+    pa = np.zeros(len(arms))
     sigma_pa = np.zeros(pa.shape)
     length = np.zeros(pa.shape)
-    for arm_label in np.arange(max(p.db.labels_) + 1):
-        arm = p.get_arm(arm_label)
-        pa[arm_label] = arm.pa
-        length[arm_label] = arm.length
-        sigma_pa[arm_label] = arm.sigma_pa
-
-    gzb_pa = (pa * length).sum() / length.sum()
+    for i, arm in enumerate(arms):
+        pa[i] = arm.pa
+        length[i] = arm.length
+        sigma_pa[i] = arm.sigma_pa
+    if len(arms) == 0:
+        return np.nan, np.nan, np.stack((pa, sigma_pa, length), axis=1)
+    combined_pa = (pa * length).sum() / length.sum()
     combined_sigma_pa = np.sqrt((length**2 * sigma_pa**2).sum()) / length.sum()
     return combined_pa, combined_sigma_pa, np.stack((pa, sigma_pa, length), axis=1)
-    coords, groups_all = cleaning.get_grouped_data(drawn_arms)
-    return pipeline.pitch_angle_pipeline(
-        drawn_arms,
-        phi=angle, ba=gal['PETRO_BA90'].iloc[0],
-        image_size=pic_array.shape[0],
-        distances=distances,
-        clean_points=False
-    )
+
+    # coords, groups_all = cleaning.get_grouped_data(drawn_arms)
+    # return pipeline.pitch_angle_pipeline(
+    #     drawn_arms,
+    #     phi=angle, ba=gal['PETRO_BA90'].iloc[0],
+    #     image_size=pic_array.shape[0],
+    #     distances=distances,
+    #     clean_points=False
+    # )
 
 
 with open('tmp_cls_dump.json') as f:

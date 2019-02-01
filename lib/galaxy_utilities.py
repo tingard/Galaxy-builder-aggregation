@@ -37,7 +37,7 @@ false = False
 # needed as we want to load files relative to this file's location, not the
 # current working directory
 def get_path(s):
-    return '{}/{}'.format(
+    return os.path.join(
         os.path.abspath(os.path.dirname(__file__)),
         s
     )
@@ -214,6 +214,13 @@ def get_psf(subject_id):
     with open(difference_fname) as difference_file:
         difference = json.load(difference_file)
     return np.array(difference['psf'], 'f8').reshape(11, 11)
+
+
+def get_distances(subject_id):
+    try:
+        return np.load(get_path('distances/subject-{}.npy'.format(subject_id)))
+    except OSError:
+        return None
 
 
 def get_galaxy_spirals(gal, angle, id, classifications):

@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import lib.galaxy_utilities as gu
 from astropy.io import fits
+import requests
 
 
 def get_pbulge(gal):
@@ -17,6 +18,32 @@ def get_pbar(gal):
     n = gal['t03_bar_a06_bar_debiased'] + gal['t03_bar_a07_no_bar_debiased']
     return gal['t03_bar_a06_bar_debiased'] / n
 
+
+skyserver_url = '/'.join((
+    'http://skyserver.sdss.org',
+    'dr13', 'en','tools', 'search',
+    'x_results.aspx'
+))
+
+
+def get_dr8_id(dr7id):
+    payload = {
+        'searchtool': 'SQL',
+        'TaskName': 'Skyserver.Search.SQL',
+        'syntax': 'NoSyntax',
+        'cmd': 'SELECT dr8objid FROM PhotoObjDR7 WHERE dr7objid = {}'.format(dr7id),
+        'format': 'json',
+        'TableName': '',
+    }
+    r = requests.get(
+        skyserver_url,
+        params=payload,
+    )
+    res = r.json()
+    return res[0]['Rows'][0]['dr8objid'] if len(res[0]['Rows']) > 0 else np.nan
+
+
+sandor_bars = pd.read_csv('Kruk2018_Table2_Table3.csv')
 
 with open('tmp_cls_dump.json') as f:
     classifications = json.load(f)
