@@ -126,6 +126,7 @@ def gen_jaccard_distances(geoms):
             distances[i, j] = jaccard_distance(geoms[i], geoms[j])
     return distances + distances.T
 
+
 def _flatten_component(component):
     _c = copy.deepcopy(component)
     for subtask in _c['details']:

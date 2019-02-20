@@ -54,15 +54,6 @@ def get_gal_pa(subject_id):
     combined_sigma_pa = np.sqrt((length**2 * sigma_pa**2).sum()) / length.sum()
     return combined_pa, combined_sigma_pa, np.stack((pa, sigma_pa, length), axis=1)
 
-    # coords, groups_all = cleaning.get_grouped_data(drawn_arms)
-    # return pipeline.pitch_angle_pipeline(
-    #     drawn_arms,
-    #     phi=angle, ba=gal['PETRO_BA90'].iloc[0],
-    #     image_size=pic_array.shape[0],
-    #     distances=distances,
-    #     clean_points=False
-    # )
-
 
 with open('tmp_cls_dump.json') as f:
     classifications = json.load(f)
