@@ -11,19 +11,23 @@ def parse_sersic_comp(comp, size_diff=1):
         return None
     drawing = comp['value'][0]['value'][0]
     major_axis_index = 0 if drawing['rx'] > drawing['ry'] else 1
-    major_axis = max(drawing['rx'], drawing['ry'])
-    minor_axis = min(drawing['rx'], drawing['ry'])
+    major_axis, minor_axis = (
+        (drawing['rx'], drawing['ry'])
+        if drawing['rx'] > drawing['ry']
+        else (drawing['ry'], drawing['rx'])
+    )
     roll = drawing['angle'] \
-        + (90 if major_axis_index == 0 else 0)
+        + (0 if major_axis_index == 0 else 90)
     out = {
         'mu': np.array((drawing['x'], drawing['y'])) * size_diff,
         # zooniverse rotation is confusing
         'roll': np.deg2rad(roll),
+        # correct for a bug in the original rendering code meaning axratio > 1
         'rEff': max(
             1e-5,
-            major_axis * float(comp['value'][1]['value']) * size_diff
+            minor_axis * float(comp['value'][1]['value']) * size_diff
         ),
-        'axRatio': major_axis / minor_axis,
+        'axRatio': minor_axis / major_axis,
         'i0': float(comp['value'][2]['value']),
         'c': 2,
         'n': 1,
@@ -69,7 +73,8 @@ def parse_annotation(annotation, size_diff=1):
     out = {'disk': None, 'bulge': None, 'bar': None, 'spiral': []}
     for component in annotation:
         if len(component['value'][0]['value']) == 0:
-            out['task'] = None
+            # component['task'] = None
+            pass
         if component['task'] == 'spiral':
             out['spiral'] = parse_spiral_comp(component, size_diff=size_diff)
         elif component['task'] == 'bar':

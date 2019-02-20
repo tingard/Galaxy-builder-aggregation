@@ -2,8 +2,6 @@ import numpy as np
 from scipy.signal import convolve2d
 import matplotlib.pyplot as plt
 from shapely.geometry import LineString, MultiPoint
-from copy import copy
-from scipy.interpolate import splprep, splev
 from numba import jit
 # Many of these functions are copied and translated from
 # https://github.com/zooniverse/Panoptes-Front-End/blob/master/app/features/modelling/galaxy-builder
@@ -205,6 +203,7 @@ def calculate_model(parsed_annotation, image_size, oversample_n=5,
     return model
 
 
+# 0.8 multiplier was present in the original rendering code
 def compare_to_galaxy(arr, psf, galaxy):
     return asinh_stretch(
         0.8 * galaxy - convolve2d(arr, psf, mode='same', boundary='symm')
@@ -230,9 +229,9 @@ def plot_model(model, psf, galaxy_data, imshow_kwargs, **kwargs):
         'cmap': 'RdGy',
     }
 
-    fig, (ax0, ax1, ax2) = plt.subplots(ncols=3, figsize=(15, 5), sharex=True,
-                                        sharey=True)
-
+    fig, (ax0, ax1, ax2) = plt.subplots(
+        ncols=3, figsize=(15, 5), sharex=True, sharey=True
+    )
     panel0 = ax0.imshow(image_data, **imshow_kwargs)
     ax1.imshow(model_data, **imshow_kwargs)
     ax2.imshow(difference_data, **imshow_kwargs)

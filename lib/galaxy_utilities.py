@@ -45,7 +45,7 @@ def get_path(s):
 df_nsa = pd.read_pickle(get_path('df_nsa.pkl'))
 
 classifications = pd.read_csv(
-    get_path('../classifications/galaxy-builder-classifications_24-1-19.csv')
+    get_path('../classifications/galaxy-builder-classifications_11-2-19.csv')
 )
 
 subjects = pd.read_csv(
@@ -221,36 +221,6 @@ def get_distances(subject_id):
         return np.load(get_path('distances/subject-{}.npy'.format(subject_id)))
     except OSError:
         return None
-
-
-def get_galaxy_spirals(gal, angle, id, classifications):
-    # Onto the clustering and fitting
-    # Extract the drawn arms from classifications for this galaxy
-    drawn_arms = get_drawn_arms(id, classifications)
-    print('\t Identified {} arms'.format(len(drawn_arms)))
-    # We'll make use of the `gzbuilderspirals` class method to cluster arms.
-    # First, initialise a `GalaxySpirals` object with the arms and deprojection
-    # parameters
-    print('\t- Clustering arms')
-    galaxy_object = GalaxySpirals(
-        drawn_arms,
-        ba=gal['SERSIC_BA'].iloc[0],
-        phi=-angle
-    )
-    if os.path.isfile(get_path('distances/subject-{}.npy'.format(id))):
-        distances = np.load(get_path('distances/subject-{}.npy'.format(id)))
-        if distances.shape[0] != len(drawn_arms):
-            distances = galaxy_object.calculate_distances()
-            np.save(get_path('distances/subject-{}.npy'.format(id)), distances)
-    else:
-        distances = galaxy_object.calculate_distances()
-
-    db = galaxy_object.cluster_lines(distances)
-
-    print('\t- Fitting arms and errors')
-    # Fit both XY and radial splines to the resulting clusters (described in
-    # more detail in the method paper)
-    return galaxy_object
 
 
 def bar_geom_from_zoo(a):
