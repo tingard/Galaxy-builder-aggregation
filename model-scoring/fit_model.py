@@ -173,7 +173,7 @@ if __name__ == '__main__-':
     # let's fine tune the disk parameters
     rest_of_model = rg.convolve2d(bulge + bar + spiral_arms, psf, mode='same',
                                   boundary='symm')
-    new_disk_comps = fit_comp(annotation, galaxy_data - rest_of_model)
+    new_disk_comps = fit_comp(annotation['disk'], galaxy_data - rest_of_model)
     new_disk_annotation = {
         **annotation['disk'], 'i0': new_disk_comps['x'][0], 'rEff': new_disk_comps['x'][1]
     }
