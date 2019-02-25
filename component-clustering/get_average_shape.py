@@ -11,13 +11,14 @@ from shapely.geometry import Point, box
 from shapely.affinity import rotate as shapely_rotate
 from shapely.affinity import scale as shapely_scale
 from shapely.affinity import translate as shapely_translate
-# from shapely.affinity import translate as shapely_translate
 from descartes import PolygonPatch
+from panoptes_aggregation.reducers.shape_metric import avg_angle
 from gzbuilderspirals import metric
 from gzbuilderspirals.oo import Pipeline
 import wrangle_classifications as wc
 import lib.galaxy_utilities as gu
 import lib.python_model_renderer.parse_annotation as pa
+from progress.bar import Bar
 
 
 # Clustering parameters
@@ -83,12 +84,20 @@ def __cluster_comp(comp_geoms, eps, min_samples):
     return __get_clusters(filtered, clf.labels_)
 
 
+def __sanitize_param_dict(p):
+    out = {k: v for k, v in p.items()}
+    out['rEff'] *= (p['axRatio'] if p['axRatio'] > 1 else 1)
+    out['axRatio'] = min(p['axRatio'], 1 / p['axRatio'])
+    out['roll'] = p['roll'] % np.pi
+    return out
+
+
 def __ellipse_from_param_list(p):
-    return __make_ellipse(get_ellipse_param_dict(p))
+    return __make_ellipse(get_param_dict(p))
 
 
 def __box_from_param_list(p):
-    return __make_box(get_ellipse_param_dict(p))
+    return __make_box(get_param_dict(p))
 
 
 def __transform_val(v, npix, petro_theta):
@@ -129,39 +138,49 @@ def cluster_components(geoms):
     return (disk_clusters, bulge_clusters, bar_clusters)
 
 
-def get_ellipse_param_dict(p):
-    return {
+def get_param_dict(p):
+    return __sanitize_param_dict({
         k: v
         for k, v in zip(
             ('mu', 'rEff', 'axRatio', 'roll'),
             [p[:2].tolist()] + p[2:].tolist()
         )
-    }
+    })
 
 
-def get_box_param_dict(p):
-    return {
-        k: v
-        for k, v in zip(
-            ('mu', 'rEff', 'axRatio', 'roll'),
-            [p[:2].tolist()] + p[2:].tolist()
-        )
-    }
-
-
-def aggregate_geom(geoms, x0=np.array((256, 256, 5, 0.7, 0)),
-                   constructor_func=__ellipse_from_param_list):
+def aggregate_geom_jaccard(geoms, x0=np.array((256, 256, 5, 0.7, 0)),
+                           constructor_func=__ellipse_from_param_list):
     def __distance_func(p):
         p = np.array(p)
         assert len(p) == 5, 'Invalid number of parameters supplied'
         comp = constructor_func(p)
         s = sum(wc.jaccard_distance(comp, other) for other in geoms)
         return s
-    return minimize(__distance_func, x0)
+    # sanitze results rather than imposing bounds to avoid getting stuck in
+    # local minima
+    return get_param_dict(
+        minimize(__distance_func, x0)['x']
+    )
 
 
-def make_model_and_plots(subject_id):
-    print('\n🌌 Working on subject id', subject_id)
+def aggregate_comp_mean(comps, constructor_func=__ellipse_from_param_list):
+    out = {'i0': 1, 'n': 1, 'c': 2}
+    keys = list(comps[0].keys())
+    for key in keys:
+        if key == 'roll':
+            clustered_angles = [
+                i['angle'] if i['rx'] > i['ry'] else (i['angle'] + 90)
+                for i in comps
+            ]
+            out['roll'] = avg_angle(clustered_angles, factor=2)
+        else:
+            out[key] = np.mean([i.get(key, np.nan) for i in comps])
+    return out
+
+
+def make_model_and_plots(subject_id, verbose=False):
+    if verbose:
+        print('\n🌌 Working on subject id', subject_id)
     gal, angle = gu.get_galaxy_and_angle(subject_id)
     pic_array, _ = gu.get_image(gal, subject_id, angle)
 
@@ -183,11 +202,11 @@ def make_model_and_plots(subject_id):
     geoms['spirals'] = spirals
 
     disk_clusters, bulge_clusters, bar_clusters = cluster_components(geoms)
-
-    print('Clustered:')
-    print('\tDisks:', len(disk_clusters))
-    print('\tBulges:', len(bulge_clusters))
-    print('\tBars:', len(bar_clusters))
+    if verbose:
+        print('Clustered:')
+        print('\tDisks:', len(disk_clusters))
+        print('\tBulges:', len(bulge_clusters))
+        print('\tBars:', len(bar_clusters))
 
     # Choose best cluster based on number of members
     max_disk_cluster_length = max(len(i) for i in disk_clusters) if len(disk_clusters) > 0 else None
@@ -208,30 +227,35 @@ def make_model_and_plots(subject_id):
         else [i for i in bar_clusters
               if len(i) == max_bar_cluster_length][0]
     )
-
-    print('Fitting aggregate components')
-    aggregate_disk = get_ellipse_param_dict(
-        aggregate_geom(disk_cluster)['x']
+    if verbose:
+        print('Fitting aggregate components')
+    aggregate_disk = aggregate_geom_jaccard(
+        disk_cluster
     ) if disk_cluster is not None else None
-    aggregate_bulge = get_ellipse_param_dict(
-        aggregate_geom(bulge_cluster)['x']
+    aggregate_bulge = aggregate_geom_jaccard(
+        bulge_cluster
     ) if bulge_cluster is not None else None
-    aggregate_bar = get_box_param_dict(
-        aggregate_geom(
-            bar_cluster,
-            constructor_func=__box_from_param_list
-        )['x']
+    aggregate_bar = aggregate_geom_jaccard(
+        bar_cluster, constructor_func=__box_from_param_list
     ) if bar_cluster is not None else None
 
-    aggregate_disk_geom = None if aggregate_disk is None else __make_ellipse(aggregate_disk)
-    aggregate_bulge_geom = None if aggregate_bulge is None else __make_ellipse(aggregate_bulge)
-    aggregate_bar_geom = None if aggregate_bar is None else __make_box(aggregate_bar)
+    aggregate_disk_geom = __make_ellipse(
+        aggregate_disk
+    ) if aggregate_disk is not None else None
+    aggregate_bulge_geom = __make_ellipse(
+        aggregate_bulge
+    ) if aggregate_bulge is not None else None
+    aggregate_bar_geom = __make_box(
+        aggregate_bar
+    ) if aggregate_bar is not None else None
 
-    print('Calculating spiral arms')
+    if verbose:
+        print('Calculating spiral arms')
     drawn_arms = gu.get_drawn_arms(subject_id, gu.classifications)
     distances = gu.get_distances(subject_id)
     if distances is None:
-        print('\t- Calculating distances')
+        if verbose:
+            print('\t- Calculating distances')
         distances = metric.calculate_distance_matrix(drawn_arms)
         np.save('./lib/distances/subject-{}.npy'.format(subject_id), distances)
     p = Pipeline(drawn_arms, phi=angle, ba=gal['PETRO_BA90'],
@@ -253,7 +277,8 @@ def make_model_and_plots(subject_id):
         )
 
     # ------------------------- SECTION: Plotting -------------------------
-    print('Plotting...')
+    if verbose:
+        print('Plotting...')
     ts = lambda s: __transform_shape(s, pic_array.shape[0], gal['PETRO_THETA'].iloc[0])
     tv = lambda v: __transform_val(v, pic_array.shape[0], gal['PETRO_THETA'].iloc[0])
 
@@ -383,5 +408,9 @@ def make_model_and_plots(subject_id):
 
 if __name__ == '__main__':
     sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
-    for subject_id in sid_list:
-        make_model_and_plots(subject_id)
+    to_iter = sid_list[:]
+    bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
+    for subject_id in to_iter:
+        make_model_and_plots(subject_id, verbose=False)
+        bar.next()
+    bar.finish()

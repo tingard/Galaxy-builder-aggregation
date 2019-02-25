@@ -62,6 +62,7 @@ def compare_clustered_disk():
     )
     plt.figure()
     for key, ax_label in zip(keys, ax_labels):
+        print(key)
         data = []
         for componentFile in os.listdir('./cluster-output'):
             if not '.json' in componentFile:
@@ -75,12 +76,12 @@ def compare_clustered_disk():
                 with open('./cluster-output/{}'.format(componentFile)) as f:
                     components = json.load(f)
                 try:
-                    if components.get('disk', {}).get('rx', False):
-                        gzb_ax_ratio = components['disk']['rx'] / components['disk']['ry']
+                    if components.get('disk', {}).get('axRatio', False):
+                        gzb_ax_ratio = components['disk']['axRatio']
                         gzb_ax_ratio = min(gzb_ax_ratio, 1/gzb_ax_ratio)
                         data.append([nsa_ax_ratio, gzb_ax_ratio])
                 except AttributeError:
-                    print(componentFile, 'contained no disk')
+                    pass
         data = np.array(data).astype(float)
         np.save('tst.npy', data)
         p_rho, p_p = pearsonr(data.T[0], data.T[1])
