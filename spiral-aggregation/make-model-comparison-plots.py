@@ -25,7 +25,7 @@ for chosen_id in id_list:
         np.save('./lib/distances/subject-{}.npy'.format(chosen_id), distances)
 
     coords, groups_all = cleaning.get_grouped_data(drawn_arms)
-    out = plotting.make_pipeline_plots(
+    plotting.make_pipeline_plots(
         drawn_arms,
         image_arr=pic_array,
         deprojected_array=deprojected_image,
