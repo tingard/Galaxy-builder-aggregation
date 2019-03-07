@@ -24,7 +24,7 @@ DISK_MIN_SAMPLES = 5
 BULGE_EPS = 0.3
 BULGE_MIN_SAMPLES = 5
 
-BAR_EPS = 0.3
+BAR_EPS = 0.4
 BAR_MIN_SAMPLES = 4
 
 
@@ -127,7 +127,7 @@ def make_model(subject_id):
                 lambda v: v.get('disk', None)
             ).dropna()
         ),
-        # **aggregate_geom_jaccard(disk_cluster_geoms.values)
+        **aggregate_geom_jaccard(disk_cluster_geoms.values)
     } if np.any(labels[0] == cluster_labels[0]) else None
 
     # calculate an aggregate bulge
@@ -137,7 +137,7 @@ def make_model(subject_id):
                 lambda v: v.get('bulge', None)
             ).dropna()
         ),
-        # **aggregate_geom_jaccard(bulge_cluster_geoms.values)
+        **aggregate_geom_jaccard(bulge_cluster_geoms.values)
     } if np.any(labels[1] == cluster_labels[1]) else None
 
     # calculate an aggregate bar
@@ -147,10 +147,10 @@ def make_model(subject_id):
                 lambda v: v.get('bar', None)
             ).dropna()
         ),
-        # **aggregate_geom_jaccard(
-        #     bar_cluster_geoms.values,
-        #     constructor_func=ash.box_from_param_list
-        # )
+        **aggregate_geom_jaccard(
+            bar_cluster_geoms.values,
+            constructor_func=ash.box_from_param_list
+        )
     } if np.any(labels[2] == cluster_labels[2]) else None
 
     arms = get_spiral_arms(subject_id)
@@ -226,51 +226,51 @@ def plot_aggregation(subject_id, model=None, cluster_masks=None, arms=None):
         return ash.transform_val(v, pic_array.shape[0],
                                  gal['PETRO_THETA'].iloc[0])
 
-    fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(
-        ncols=2, nrows=2,
-        figsize=(10, 10),
-        sharex=True, sharey=True
-    )
-    imshow_kwargs = {
-        'cmap': 'gray',
-        'origin': 'lower',
-        'extent': [tv(0), tv(pic_array.shape[0])]*2,
-    }
-    ax0.imshow(pic_array, **imshow_kwargs)
-    for comp in geoms['disk'].values:
-        if comp is not None:
-            ax0.add_patch(
-                PolygonPatch(ts(comp), fc='C0', ec='k',
-                             alpha=0.2, zorder=3)
-            )
-    ax1.imshow(pic_array, **imshow_kwargs)
-    for comp in geoms['bulge'].values:
-        if comp is not None:
-            ax1.add_patch(
-                PolygonPatch(ts(comp), fc='C1', ec='k',
-                             alpha=0.5, zorder=3)
-            )
-    ax2.imshow(pic_array, **imshow_kwargs)
-    for comp in geoms['bar'].values:
-        if comp is not None:
-            ax2.add_patch(
-                PolygonPatch(ts(comp), fc='C2', ec='k',
-                             alpha=0.2, zorder=3)
-            )
-    ax3.imshow(pic_array, **imshow_kwargs)
-    for arm in drawn_arms:
-        ax3.plot(*tv(arm).T)
-
-    for i, ax in enumerate((ax0, ax1, ax2, ax3)):
-        ax.set_xlim(imshow_kwargs['extent'][:2])
-        ax.set_ylim(imshow_kwargs['extent'][2:])
-        if i % 2 == 0:
-            ax.set_ylabel('Arcseconds from center')
-        if i > 1:
-            ax.set_xlabel('Arcseconds from center')
-    fig.subplots_adjust(wspace=0.05, hspace=0.05)
-    plt.savefig('drawn_shapes/{}.pdf'.format(subject_id), bbox_inches='tight')
-    plt.close()
+    # fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(
+    #     ncols=2, nrows=2,
+    #     figsize=(10, 10),
+    #     sharex=True, sharey=True
+    # )
+    # imshow_kwargs = {
+    #     'cmap': 'gray',
+    #     'origin': 'lower',
+    #     'extent': [tv(0), tv(pic_array.shape[0])]*2,
+    # }
+    # ax0.imshow(pic_array, **imshow_kwargs)
+    # for comp in geoms['disk'].values:
+    #     if comp is not None:
+    #         ax0.add_patch(
+    #             PolygonPatch(ts(comp), fc='C0', ec='k',
+    #                          alpha=0.2, zorder=3)
+    #         )
+    # ax1.imshow(pic_array, **imshow_kwargs)
+    # for comp in geoms['bulge'].values:
+    #     if comp is not None:
+    #         ax1.add_patch(
+    #             PolygonPatch(ts(comp), fc='C1', ec='k',
+    #                          alpha=0.5, zorder=3)
+    #         )
+    # ax2.imshow(pic_array, **imshow_kwargs)
+    # for comp in geoms['bar'].values:
+    #     if comp is not None:
+    #         ax2.add_patch(
+    #             PolygonPatch(ts(comp), fc='C2', ec='k',
+    #                          alpha=0.2, zorder=3)
+    #         )
+    # ax3.imshow(pic_array, **imshow_kwargs)
+    # for arm in drawn_arms:
+    #     ax3.plot(*tv(arm).T)
+    #
+    # for i, ax in enumerate((ax0, ax1, ax2, ax3)):
+    #     ax.set_xlim(imshow_kwargs['extent'][:2])
+    #     ax.set_ylim(imshow_kwargs['extent'][2:])
+    #     if i % 2 == 0:
+    #         ax.set_ylabel('Arcseconds from center')
+    #     if i > 1:
+    #         ax.set_xlabel('Arcseconds from center')
+    # fig.subplots_adjust(wspace=0.05, hspace=0.05)
+    # plt.savefig('drawn_shapes/{}.pdf'.format(subject_id), bbox_inches='tight')
+    # plt.close()
 
     fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(
         ncols=2, nrows=2,
@@ -358,7 +358,7 @@ def plot_aggregation(subject_id, model=None, cluster_masks=None, arms=None):
 
 if __name__ == '__main__':
     sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
-    to_iter = sid_list[100:]
+    to_iter = sid_list
     bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
     for subject_id in to_iter:
         model, cluster_masks, arms = make_model(subject_id)

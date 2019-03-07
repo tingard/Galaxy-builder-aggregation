@@ -10,12 +10,19 @@ from gzbuilderspirals import metric
 from gzbuilderspirals.oo import Pipeline
 import lib.galaxy_utilities as gu
 import wrangle_classifications as wc
+import warnings
+from astropy.utils.exceptions import AstropyWarning
+warnings.simplefilter('ignore', category=AstropyWarning)
+from progress.bar import Bar
+
 
 DISK_EPS = 0.3
-DISK_MIN_SAMPLES = 8
-BULGE_EPS = 0.4
+DISK_MIN_SAMPLES = 5
+
+BULGE_EPS = 0.3
 BULGE_MIN_SAMPLES = 5
-BAR_EPS = 0.5
+
+BAR_EPS = 0.4
 BAR_MIN_SAMPLES = 4
 
 MAX_BAR_AXRATIO = 0.7
@@ -25,7 +32,7 @@ MAX_BULGE_BAR_SIMILARITY = 0.8
 
 def cluster_disks(drawn_disks, eps=DISK_EPS, min_samples=DISK_MIN_SAMPLES):
     if len(drawn_disks) == 0:
-        print('\tNo drawn disks')
+        # print('\tNo drawn disks')
         return None, None, None
     disk_geoms = np.array([
         wc.ellipse_geom_from_zoo(d['value'][0]['value'][0])
@@ -35,8 +42,8 @@ def cluster_disks(drawn_disks, eps=DISK_EPS, min_samples=DISK_MIN_SAMPLES):
     clf_disk = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
     clf_disk.fit(disk_distances)
     disk_labels = clf_disk.labels_
-    if len(np.unique(disk_labels)) > 2:
-        print('\tMultiple ({}) disk clusters found'.format(len(np.unique(disk_labels))))
+    # if len(np.unique(disk_labels)) > 2:
+    #     print('\tMultiple ({}) disk clusters found'.format(len(np.unique(disk_labels))))
     clustered_annotations = np.array(drawn_disks)[disk_labels == 0]
     clustered_disks = [d['value'][0]['value'][0] for d in clustered_annotations]
     clustered_angles = [
@@ -49,7 +56,7 @@ def cluster_disks(drawn_disks, eps=DISK_EPS, min_samples=DISK_MIN_SAMPLES):
     )
 
     if len(clustered_disks) == 0:
-        print('\tNo disk cluster')
+        # print('\tNo disk cluster')
         return disk_geoms, None, None
     mean_disk = {}
     mean_disk['x'] = np.mean([i['x'] for i in clustered_disks])
@@ -109,7 +116,7 @@ def get_bulge_from_cluster(drawn_bulges, bulge_labels):
 
 def cluster_bulges(drawn_bulges, eps=BULGE_EPS, min_samples=BULGE_MIN_SAMPLES):
     if len(drawn_bulges) == 0:
-        print('\tNo drawn bulges')
+        # print('\tNo drawn bulges')
         return None, None, None
     bulge_geoms = np.array([
         wc.ellipse_geom_from_zoo(b['value'][0]['value'][0])
@@ -120,19 +127,19 @@ def cluster_bulges(drawn_bulges, eps=BULGE_EPS, min_samples=BULGE_MIN_SAMPLES):
     clf_bulge.fit(bulge_distances)
     bulge_labels = clf_bulge.labels_
     mean_bulge = {}
-    if len(np.unique(bulge_labels)) > 2:
-        print('\tMultiple ({}) bulge clusters found'.format(len(np.unique(bulge_labels))))
+    # if len(np.unique(bulge_labels)) > 2:
+    #     print('\tMultiple ({}) bulge clusters found'.format(len(np.unique(bulge_labels))))
 
     mean_bulge, mean_bulge_geom = get_bulge_from_cluster(drawn_bulges, bulge_labels)
 
-    if mean_bulge is None:
-        print('\tNo bulge cluster')
+    # if mean_bulge is None:
+    #     print('\tNo bulge cluster')
     return bulge_geoms, mean_bulge, mean_bulge_geom
 
 
 def cluster_bars(drawn_bars, eps=BAR_EPS, min_samples=BAR_MIN_SAMPLES):
     if len(drawn_bars) == 0:
-        print('\tNo drawn bars')
+        # print('\tNo drawn bars')
         return None, None, None
 
     bar_geoms = np.array([
@@ -143,12 +150,12 @@ def cluster_bars(drawn_bars, eps=BAR_EPS, min_samples=BAR_MIN_SAMPLES):
     clf_bar = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
     clf_bar.fit(bar_distances)
     bar_labels = clf_bar.labels_
-    if len(np.unique(bar_labels)) > 2:
-        print('\tMultiple ({}) bar clusters found'.format(len(np.unique(bar_labels))))
+    # if len(np.unique(bar_labels)) > 2:
+    #     print('\tMultiple ({}) bar clusters found'.format(len(np.unique(bar_labels))))
     clustered_annotations = np.array(drawn_bars)[bar_labels == 0]
     clustered_bars = [b['value'][0]['value'][0] for b in clustered_annotations]
     if len(clustered_bars) == 0:
-        print('\tNo bar cluster')
+        # print('\tNo bar cluster')
         return bar_geoms, None, None
     center_xs = [i['x'] + i['width']/2 for i in clustered_bars]
     center_ys = [i['y'] + i['height']/2 for i in clustered_bars]
@@ -184,7 +191,7 @@ def cluster_bars(drawn_bars, eps=BAR_EPS, min_samples=BAR_MIN_SAMPLES):
 
 
 def cluster_components(subject_id):
-    print('Working on subject', subject_id)
+    # print('Working on subject', subject_id)
 
     classifications_for_subject = gu.classifications[
         gu.classifications['subject_ids'] == subject_id
@@ -203,9 +210,9 @@ def cluster_components(subject_id):
     drawn_bulges = [i for i in bulges if len(i['value'][0]['value']) > 0]
     drawn_bars = [i for i in bars if len(i['value'][0]['value']) > 0]
 
-    print('\tFound {} disks, {} bulges and {} bars'.format(
-        *map(len, (drawn_disks, drawn_bulges, drawn_bars)))
-    )
+    # print('\tFound {} disks, {} bulges and {} bars'.format(
+    #     *map(len, (drawn_disks, drawn_bulges, drawn_bars)))
+    # )
 
     disk_geoms, mean_disk, mean_disk_geom = cluster_disks(drawn_disks)
     bulge_geoms, mean_bulge, mean_bulge_geom = cluster_bulges(drawn_bulges)
@@ -214,18 +221,18 @@ def cluster_components(subject_id):
     # Small checks to test if we have a physical result
     try:
         if mean_bar_geom.area / mean_disk_geom.area > MAX_BAR_FRACTION:
-            print('\tAggregate bar too large relative to disk, ignoring')
+            # print('\tAggregate bar too large relative to disk, ignoring')
             mean_bar = None
         if mean_bar.height / mean_bar.width > MAX_BAR_AXRATIO:
-            print('\tAggregate bar too square, ignoring')
+            # print('\tAggregate bar too square, ignoring')
             mean_bar = None
-        if mean_bulge_geom.intersection(mean_bar_geom).area / mean_bulge_geom.union(mean_bar_geom).area > MAX_BULGE_BAR_SIMILARITY:
-            print('\tBulge and bar very similar for {}'.format(subject_id))
+        # if mean_bulge_geom.intersection(mean_bar_geom).area / mean_bulge_geom.union(mean_bar_geom).area > MAX_BULGE_BAR_SIMILARITY:
+        #     print('\tBulge and bar very similar for {}'.format(subject_id))
     except AttributeError:
         # one of the components is already None
         pass
 
-    with open('cluster-output/{}.json'.format(subject_id), 'w') as f:
+    with open('cluster-output-old/{}.json'.format(subject_id), 'w') as f:
         json.dump({'disk': mean_disk, 'bulge': mean_bulge, 'bar': mean_bar}, f)
     return (
         (disk_geoms, mean_disk, mean_disk_geom),
@@ -234,7 +241,7 @@ def cluster_components(subject_id):
     )
 
 
-def get_log_spirals(subject_id, gal=None, angle=None, pic_array=None):
+def get_log_spirals(subject_id, gal=None, angle=None, pic_array=None, bar_length=0):
     drawn_arms = gu.get_drawn_arms(subject_id, gu.classifications)
     if gal is None or angle is None:
         gal, angle = gu.get_galaxy_and_angle(subject_id)
@@ -245,16 +252,15 @@ def get_log_spirals(subject_id, gal=None, angle=None, pic_array=None):
 
     distances = gu.get_distances(subject_id)
     if distances is None or distances.shape[0] != len(drawn_arms) or not os.path.exists(path_to_subject):
-        print('\t- Calculating distances')
+        # print('\t- Calculating distances')
         distances = metric.calculate_distance_matrix(drawn_arms)
         np.save('./lib/distances/subject-{}.npy'.format(subject_id), distances)
 
     p = Pipeline(drawn_arms, phi=angle, ba=gal['PETRO_BA90'],
                  image_size=pic_array.shape[0], distances=distances)
 
-    arms = [p.get_arm(i, clean_points=True)
-            for i in range(max(p.db.labels_) + 1)]
-    print('Identified {} spiral arms'.format(len(arms)))
+    arms = p.get_arms(clean_points=True, bar_length=bar_length)
+    # print('Identified {} spiral arms'.format(len(arms)))
     return [arm.reprojected_log_spiral for arm in arms]
 
 
@@ -271,14 +277,18 @@ def plot_component(pic_array, patches, outfile=None):
 
 
 if __name__ == "__main__":
-    for subject_id in np.loadtxt('lib/subject-id-list.csv', dtype='u8'):
+    sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
+    to_iter = sid_list
+    progress_bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
+    for subject_id in to_iter:
         gal, angle = gu.get_galaxy_and_angle(subject_id)
         pic_array, deprojected_image = gu.get_image(gal, subject_id, angle)
         pix_size = pic_array.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4)  # pixels per arcsecond
 
         disk_res, bulge_res, bar_res = cluster_components(subject_id)
-        spirals = get_log_spirals(subject_id, gal=gal, angle=angle, pic_array=pic_array)
 
+        spirals = get_log_spirals(subject_id, gal=gal, angle=angle,
+                                  pic_array=pic_array, bar_length=10)
         xtick_labels = np.linspace(-100, 100, 11).astype(int)
         xtick_positions = xtick_labels * pix_size + pic_array.shape[0] / 2
         xtick_mask = (xtick_positions > 0) & (xtick_positions < pic_array.shape[0])
@@ -378,3 +388,5 @@ if __name__ == "__main__":
         outfile = 'clustered-components-images/{}.png'.format(subject_id)
         plt.savefig(outfile)
         plt.close()
+        progress_bar.next()
+    progress_bar.finish()

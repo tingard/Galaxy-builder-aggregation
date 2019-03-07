@@ -64,6 +64,8 @@ def get_gzb_axis_ratios():
             components = {}
         disk = components.get('disk', {})
         axRatio = disk.get('axRatio', np.nan) if disk is not None else np.nan
+        if axRatio > 0.95:
+            print(sid);
         axr.append(axRatio)
     return pd.Series(data=axr, index=sid_list, name='GZB disk axis ratio')
 
@@ -107,7 +109,6 @@ def compare_clustered_disk():
         plt.ylim(0, 1)
         plt.xlabel(ax_label)
         plt.ylabel('Axis ratio from Galaxy builder disk component')
-        plt.title('Pearson correlation coefficient: {:.4f}'.format(p_rho))
         plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_{}.pdf'.format(key), bbox_inches='tight')
         plt.clf()
 
