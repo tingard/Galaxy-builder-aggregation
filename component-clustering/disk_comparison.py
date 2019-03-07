@@ -1,16 +1,16 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import os
 import json
-import lib.galaxy_utilities as gu
-from sklearn.metrics import r2_score
+import re
+import numpy as np
+import pandas as pd
 from scipy.stats import pearsonr
+import matplotlib.pyplot as plt
+import lib.galaxy_utilities as gu
 
 
 def compare_all_classifications():
     with open('tmp_cls_dump.json') as f:
         classifications = json.load(f)
-
     bas = []
     gzb_ax_ratios = {}
     nsa_ax_ratios = []
@@ -50,7 +50,37 @@ def compare_all_classifications():
     plt.ylabel('Axis ratio')
     plt.xticks(x, list(map(int, sid_by_ax)), rotation=90)
     plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_boxplot.pdf', bbox_inches='tight')
-    plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_boxplot.png', bbox_inches='tight')
+
+
+def get_gzb_axis_ratios():
+    sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
+    axr = []
+    for sid in sid_list:
+        file_loc = os.path.join('cluster-output', '{}.json'.format(sid))
+        if os.path.exists(file_loc):
+            with open(file_loc) as f:
+                components = json.load(f)
+        else:
+            components = {}
+        disk = components.get('disk', {})
+        axRatio = disk.get('axRatio', np.nan) if disk is not None else np.nan
+        axr.append(axRatio)
+    return pd.Series(data=axr, index=sid_list, name='GZB disk axis ratio')
+
+
+def get_nsa_key(key, name='NSA catalog value'):
+    sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
+    axr = []
+    for sid in sid_list:
+        metadata = gu.meta_map.get(sid, {})
+        NSAID = metadata.get('NSA id', False)
+        if NSAID is not False:
+            galaxy = gu.df_nsa[gu.df_nsa['NSAID'] == int(NSAID)]
+            nsa_val = galaxy[key].values[0]
+        else:
+            nsa_val = np.nan
+        axr.append(nsa_val)
+    return pd.Series(data=axr, index=sid_list, name=name)
 
 
 def compare_clustered_disk():
@@ -61,32 +91,17 @@ def compare_clustered_disk():
         'Axis ratio from 2D Sérsic fit',
     )
     plt.figure()
+    gzb_ax_ratios = get_gzb_axis_ratios()
     for key, ax_label in zip(keys, ax_labels):
         print(key)
-        data = []
-        for componentFile in os.listdir('./cluster-output'):
-            if not '.json' in componentFile:
-                continue
-            metadata = gu.meta_map.get(int(componentFile.split('.json')[0]), {})
-            NSAID = metadata.get('NSA id', False)
-            if NSAID is not False:
-                galaxy = gu.df_nsa[gu.df_nsa['NSAID'] == int(NSAID)]
-                nsa_ax_ratio = galaxy[key].values
-
-                with open('./cluster-output/{}'.format(componentFile)) as f:
-                    components = json.load(f)
-                try:
-                    if components.get('disk', {}).get('axRatio', False):
-                        gzb_ax_ratio = components['disk']['axRatio']
-                        gzb_ax_ratio = min(gzb_ax_ratio, 1/gzb_ax_ratio)
-                        data.append([nsa_ax_ratio, gzb_ax_ratio])
-                except AttributeError:
-                    pass
-        data = np.array(data).astype(float)
-        np.save('tst.npy', data)
-        p_rho, p_p = pearsonr(data.T[0], data.T[1])
+        nsa_data = get_nsa_key(key, name='NSA {}'.format(key))
+        df = pd.concat((nsa_data, gzb_ax_ratios), axis=1).dropna()
+        print(df.values.T.shape)
+        p_rho, p_p = pearsonr(*df.values.T)
+        # print(pd.concat((nsa_data, gzb_ax_ratios), axis=1))
+        print('Coefficient: {:.4f}'.format(p_rho))
         print('Probability samples are correlated: {:.8f}'.format(1-p_p))
-        plt.scatter(*data.T)
+        plt.scatter(nsa_data, gzb_ax_ratios)
         plt.plot([0, 1], [0, 1], 'k', alpha=0.4)
         plt.xlim(0, 1)
         plt.ylim(0, 1)
@@ -94,7 +109,6 @@ def compare_clustered_disk():
         plt.ylabel('Axis ratio from Galaxy builder disk component')
         plt.title('Pearson correlation coefficient: {:.4f}'.format(p_rho))
         plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_{}.pdf'.format(key), bbox_inches='tight')
-        plt.savefig('method-paper-plots/GZBvsNSA_ax-ratio_{}.png'.format(key), bbox_inches='tight')
         plt.clf()
 
 
