@@ -10,6 +10,10 @@ from shapely.affinity import rotate as shapely_rotate
 from shapely.affinity import scale as shapely_scale
 from shapely.affinity import translate as shapely_translate
 from descartes import PolygonPatch
+from progress.bar import Bar
+import warnings
+from astropy.utils.exceptions import AstropyWarning
+warnings.simplefilter('ignore', category=AstropyWarning)
 
 
 def transform_coords(c, galaxy_data=np.zeros((2, 2)), pix_size=1.0):
@@ -62,6 +66,11 @@ def get_geoms(model_details):
     return disk, bulge, bar
 
 
+def __score(D):
+    N = np.multiply.reduce(D.shape)
+    return 100 * np.exp(-300 / N * np.sum(rg.asinh(np.abs(D) / 0.6)**2 / rg.asinh(0.6)))
+
+
 def plot_residuals(residuals, galaxy_data, blank_data):
     plt.plot(residuals)
     plt.ylabel('Mean error per pixel')
@@ -75,17 +84,16 @@ def plot_residuals(residuals, galaxy_data, blank_data):
     plt.yscale('log')
 
 
-def plot_model(model_data, galaxy_data, psf, model_details, imshow_kwargs,
-               transform_coords, transform_patch):
+def plot_model(model_data, galaxy_data, psf, model_details, pixel_mask,
+               imshow_kwargs, transform_coords, transform_patch):
     image_data = rg.asinh_stretch(galaxy_data)
-    difference_data = rg.compare_to_galaxy(model_data, psf, galaxy_data)
-    model_data = rg.post_process(model_data, psf)
+    difference_data = rg.compare_to_galaxy(model_data, psf, galaxy_data) * pixel_mask
 
     diff = 0.8 * galaxy_data - rg.convolve2d(model_data, psf, mode='same', boundary='symm')
-    score = 100*np.exp(
-        -300 / np.multiply.reduce(galaxy_data.shape)
-        * rg.asinh_stretch(np.abs(diff))**2
-    )
+    diff *= pixel_mask
+    score = __score(diff)
+    scaled_model_data = rg.post_process(model_data, psf)
+
     disk, bulge, bar = get_geoms(model_details)
 
     imshow_kwargs = {
@@ -109,7 +117,7 @@ def plot_model(model_data, galaxy_data, psf, model_details, imshow_kwargs,
             )
     for arm in model_details['spiral']:
         ax1.plot(*transform_coords(arm[0].T))
-    ax2.imshow(model_data, **imshow_kwargs)
+    ax2.imshow(scaled_model_data, **imshow_kwargs)
     ax3.imshow(difference_data, **imshow_kwargs)
 
     plt.subplots_adjust(right=0.9, wspace=0.1, hspace=0)
@@ -127,8 +135,12 @@ def plot_model(model_data, galaxy_data, psf, model_details, imshow_kwargs,
     plt.suptitle('Model score: {:.2f}'.format(score))
 
 
-for subject_id in np.loadtxt('lib/subject-id-list.csv', dtype='u8'):
-    print('Working on', subject_id)
+verbose = False
+to_iter = np.loadtxt('lib/subject-id-list.csv', dtype='u8')
+bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
+for subject_id in to_iter:
+    if verbose:
+        print('Working on', subject_id)
     annotations = gu.classifications[
         gu.classifications['subject_ids'] == subject_id
     ]['annotations'].apply(json.loads).values.tolist()
@@ -136,6 +148,7 @@ for subject_id in np.loadtxt('lib/subject-id-list.csv', dtype='u8'):
     pic_array, deprojected_image = gu.get_image(gal, subject_id, angle)
     psf = gu.get_psf(subject_id)
     diff_data = gu.get_image_data(subject_id)
+    pixel_mask = 1 - np.array(diff_data['mask'])
     galaxy_data = np.array(diff_data['imageData'])[::-1]
     size_diff = diff_data['width'] / diff_data['imageWidth']
     # arcseconds per pixel for zooniverse image
@@ -166,7 +179,7 @@ for subject_id in np.loadtxt('lib/subject-id-list.csv', dtype='u8'):
         )
         model = rg.calculate_model(parsed_annotation, diff_data['width'])
         model_array[i] = model
-        difference_data = rg.compare_to_galaxy(model, psf, galaxy_data)
+        difference_data = rg.compare_to_galaxy(model, psf, galaxy_data) * pixel_mask
         residuals[i] = np.sqrt(np.sum(difference_data**2)) \
             / np.multiply.reduce(galaxy_data.shape)
     blank_data = rg.compare_to_galaxy(np.zeros_like(galaxy_data), psf, galaxy_data)
@@ -179,7 +192,9 @@ for subject_id in np.loadtxt('lib/subject-id-list.csv', dtype='u8'):
     best_annotation_parsed = pa.parse_annotation(best_annotation, size_diff=size_diff)
     model_data = model_array[np.argmin(residuals)]
 
-    plot_model(model_data, galaxy_data, psf, best_annotation_parsed,
+    plot_model(model_data, galaxy_data, psf, best_annotation_parsed, pixel_mask,
                imshow_kwargs, tc, tp)
     plt.savefig('best_residual/{}.pdf'.format(subject_id))
     plt.close()
+    bar.next()
+bar.finish()

@@ -1,0 +1,58 @@
+# Gas RC data from MPL-5
+# Mon 25 Feb 2019 09:11:08
+# PLATEIFU: 8714-6101
+#
+# R: Bin center radius in arcsec
+# V: Error-weighted projected rotation speed in km/s; i.e. Vrot * sin(i).
+#    Clipped out large (10-sigma) outliers; only includes data within a 
+#    +/- 30 deg wedge around the major axis.
+# Ve: Error-weighted standard deviation of the projected rotation speed.
+# N: Number of spaxels in the bin
+#
+# GAS_IC fit: Only H-alpha velocities fit; center and inclination fixed.
+#      Center: 0.0+/-0.0 0.0 0.0
+#      Inclination: 18.9+/-0.0
+#      Photometric Inclination: 18.9
+#      Position Angle: 23.4+/-0.9
+#      Gas systemic velocity: 5.8+/-0.1
+#      Gas asymptotic rotation speed: 9.7+/-0.2
+#      Gas rotation scale: 3.4+/-0.3
+#
+# GAS___ fit: Only H-alpha velocities fit; center and inclination free.
+#      Center: -2.0+/-0.3 0.2 0.3
+#      Inclination: 83.4+/-9.0
+#      Photometric Inclination: 18.9
+#      Position Angle: 26.4+/-0.8
+#      Gas systemic velocity: 6.7+/-0.4
+#      Gas asymptotic rotation speed: 59.8+/-80.8
+#      Gas rotation scale: 39.5+/-54.7
+#
+# BTH_IC fit: Simultaneously fit H-alpha velocities and stellar velocities with common projection geometry; center and inclination fixed.
+#      Center: 0.0+/-0.0 0.0 0.0
+#      Inclination: 18.9+/-0.0
+#      Photometric Inclination: 18.9
+#      Position Angle: 17.2+/-0.8
+#      Gas systemic velocity: 6.1+/-0.1
+#      Gas asymptotic rotation speed: 9.6+/-0.2
+#      Gas rotation scale: 3.7+/-0.3
+#
+# BTH___ fit: Simultaneously fit H-alpha velocities and stellar velocities with common projection geometry; center and inclination free.
+#      Center: -1.9+/-0.2 0.3 0.1
+#      Inclination: 29.4+/-6.0
+#      Photometric Inclination: 18.9
+#      Position Angle: 20.7+/-0.8
+#      Gas systemic velocity: 6.2+/-0.2
+#      Gas asymptotic rotation speed: 9.7+/-0.3
+#      Gas rotation scale: 3.1+/-0.3
+#
+#             GAS_IC               GAS___               BTH_IC               BTH___       
+#      -------------------- -------------------- -------------------- --------------------
+#    R       V      Ve    N       V      Ve    N       V      Ve    N       V      Ve    N
+   1.6     3.7     2.1   34     4.7     3.5    4     3.8     2.1   36     4.7     3.2   30
+   3.3     5.5     2.8   64     9.6     3.2    9     5.7     2.6   66     8.8     3.4   58
+   4.9     8.4     4.5   96    12.3     2.3   12     8.4     4.7   98    10.9     4.4   91
+   6.5    10.8     4.8  132    14.7     2.7   19    10.9     4.9  132    12.6     4.4  122
+   8.2     8.8     3.4  164    14.2     3.0   20     9.2     3.3  166    10.9     3.0  139
+   9.8     6.9     2.5  140    10.0     3.0   18     7.1     2.2  136     7.8     2.0  101
+  11.4     5.9     2.0   24     8.3     3.3    6     6.4     1.9   23     6.4     0.9   33
+  13.1 -9999.0 -9999.0    0 -9999.0 -9999.0    0 -9999.0 -9999.0    0     6.3     0.4    5
