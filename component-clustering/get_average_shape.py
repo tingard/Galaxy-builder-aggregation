@@ -1,13 +1,13 @@
 import os
 import json
+import re
 import numpy as np
 from scipy.optimize import minimize
 import pandas as pd
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
 from panoptes_aggregation.reducers.shape_metric import avg_angle
-from gzbuilderspirals import metric
-from gzbuilderspirals.oo import Pipeline
+from gzbuilderspirals.oo import Pipeline, Arm
 import wrangle_classifications as wc
 import lib.galaxy_utilities as gu
 import lib.python_model_renderer.parse_annotation as pa
@@ -22,13 +22,24 @@ DISK_EPS = 0.3
 DISK_MIN_SAMPLES = 5
 
 BULGE_EPS = 0.3
-BULGE_MIN_SAMPLES = 5
+BULGE_MIN_SAMPLES = 3
 
-BAR_EPS = 0.4
-BAR_MIN_SAMPLES = 4
+BAR_EPS = 0.3846467
+BAR_MIN_SAMPLES = 3
+
+MAX_BAR_AXRATIO = 0.6
 
 
-# SECTION: Functions to cluster and aggregate components
+def sanitize_model(model):
+    try:
+        bar_axratio = model.get('bar', {}).get('axRatio', 1)
+        if bar_axratio > MAX_BAR_AXRATIO:
+            model['bar'] = None
+    except AttributeError:
+        pass
+    return model
+
+
 def get_geoms(model_details):
     """Function to obtain shapely geometries from parsed Zooniverse
     classifications
@@ -60,8 +71,10 @@ def aggregate_geom_jaccard(geoms, x0=np.array((256, 256, 5, 0.7, 0)),
         return s
     # sanitze results rather than imposing bounds to avoid getting stuck in
     # local minima
-    return ash.get_param_dict(
-        minimize(__distance_func, x0)['x']
+    return ash.sanitize_param_dict(
+        ash.get_param_dict(
+            minimize(__distance_func, x0)['x']
+        )
     )
 
 
@@ -83,17 +96,28 @@ def aggregate_comp_mean(comps):
     return out
 
 
-def get_spiral_arms(subject_id):
-    gal, angle = gu.get_galaxy_and_angle(subject_id)
-    drawn_arms = gu.get_drawn_arms(subject_id, gu.classifications)
-    distances = gu.get_distances(subject_id)
-    if distances is None:
-        distances = metric.calculate_distance_matrix(drawn_arms)
-        np.save('lib/distances/subject-{}.npy'.format(subject_id), distances)
-    p = Pipeline(drawn_arms, phi=angle, ba=gal['PETRO_BA90'],
-                 image_size=512, distances=distances)
-    return [p.get_arm(i, clean_points=True)
-            for i in range(max(p.db.labels_) + 1)]
+def get_spiral_arms(subject_id, should_recreate=True):
+    if (
+        (not os.path.exists('lib/pipelines/{}.json'.format(subject_id)))
+        or should_recreate
+    ):
+        gal, angle = gu.get_galaxy_and_angle(subject_id)
+        drawn_arms = gu.get_drawn_arms(subject_id, gu.classifications)
+        distances = None
+        p = Pipeline(drawn_arms, phi=angle, ba=gal['PETRO_BA90'],
+                     image_size=512, distances=distances, parallel=True)
+        p.save('lib/pipelines/{}.json'.format(subject_id))
+        arms = p.get_arms()
+        for i, arm in enumerate(arms):
+            arm.save('lib/spiral_arms/{}-{}'.format(subject_id, i))
+        return arms
+    else:
+        arm_files = [
+            os.path.join('lib/spiral_arms', i)
+            for i in os.listdir('lib/spiral_arms')
+            if str(subject_id) in i
+        ]
+        return [Arm.load(a) for a in arm_files]
 
 
 def make_model(subject_id):
@@ -102,58 +126,77 @@ def make_model(subject_id):
     ]['annotations'].apply(json.loads)
     models = annotations\
         .apply(ash.remove_scaling)\
-        .apply(pa.parse_annotation)
+        .apply(pa.parse_annotation)\
+        .apply(sanitize_model)
     spirals = models.apply(lambda d: d.get('spiral', None))
     geoms = pd.DataFrame(
         models.apply(get_geoms).values.tolist(),
         columns=('disk', 'bulge', 'bar')
     )
     geoms['spirals'] = spirals
-    labels = list(map(np.array, cluster_components(geoms)))
 
+    labels = list(map(np.array, cluster_components(geoms)))
     cluster_labels = list(map(ash.largest_cluster_label, labels))
     cluster_masks = [a == b for a, b in zip(labels, cluster_labels)]
 
-    np.save('cluster_masks/{}.npy'.format(subject_id), cluster_masks)
+    fpath = 'cluster_masks/{}.npy'.format(subject_id)
+    np.save(fpath, cluster_masks)
 
     disk_cluster_geoms = geoms['disk'][cluster_masks[0]]
     bulge_cluster_geoms = geoms['bulge'][cluster_masks[1]]
     bar_cluster_geoms = geoms['bar'][cluster_masks[2]]
 
     # calculate an aggregate disk
-    aggregate_disk = {
-        **aggregate_comp_mean(
+    if not np.any(labels[0] == cluster_labels[0]):
+        aggregate_disk = None
+    else:
+        aggregate_disk = aggregate_comp_mean(
             models[labels[0] == cluster_labels[0]].apply(
                 lambda v: v.get('disk', None)
             ).dropna()
-        ),
-        **aggregate_geom_jaccard(disk_cluster_geoms.values)
-    } if np.any(labels[0] == cluster_labels[0]) else None
-
+        )
+        aggregate_disk = {
+            **aggregate_disk,
+            **aggregate_geom_jaccard(
+                disk_cluster_geoms.values,
+                x0=ash.get_param_list(aggregate_disk)
+            )
+        }
     # calculate an aggregate bulge
-    aggregate_bulge = {
-        **aggregate_comp_mean(
+    if not np.any(labels[1] == cluster_labels[1]):
+        aggregate_bulge = None
+    else:
+        aggregate_bulge = aggregate_comp_mean(
             models[labels[1] == cluster_labels[1]].apply(
                 lambda v: v.get('bulge', None)
             ).dropna()
-        ),
-        **aggregate_geom_jaccard(bulge_cluster_geoms.values)
-    } if np.any(labels[1] == cluster_labels[1]) else None
-
+        )
+        aggregate_bulge = {
+            **aggregate_bulge,
+            **aggregate_geom_jaccard(
+                bulge_cluster_geoms.values,
+                x0=ash.get_param_list(aggregate_bulge)
+            )
+        }
     # calculate an aggregate bar
-    aggregate_bar = {
-        **aggregate_comp_mean(
+    if not np.any(labels[2] == cluster_labels[2]):
+        aggregate_bar = None
+    else:
+        aggregate_bar = aggregate_comp_mean(
             models[labels[2] == cluster_labels[2]].apply(
                 lambda v: v.get('bar', None)
             ).dropna()
-        ),
-        **aggregate_geom_jaccard(
-            bar_cluster_geoms.values,
-            constructor_func=ash.box_from_param_list
         )
-    } if np.any(labels[2] == cluster_labels[2]) else None
+        aggregate_bar = {
+            **aggregate_bar,
+            **aggregate_geom_jaccard(
+                bar_cluster_geoms.values,
+                x0=ash.get_param_list(aggregate_bar),
+                constructor_func=ash.box_from_param_list,
+            )
+        }
 
-    arms = get_spiral_arms(subject_id)
+    arms = get_spiral_arms(subject_id, should_recreate=False)
     logsps = [arm.reprojected_log_spiral for arm in arms]
 
     with open('cluster-output/{}.json'.format(subject_id), 'w') as f:
@@ -187,24 +230,21 @@ def plot_aggregation(subject_id, model=None, cluster_masks=None, arms=None):
             model = json.load(f)
         with open(masks_path) as f:
             cluster_masks = np.load(f)
-        arms = get_spiral_arms(subject_id)
+        arms = get_spiral_arms(subject_id, should_recreate=False)
 
     annotations = gu.classifications[
         gu.classifications['subject_ids'] == subject_id
     ]['annotations'].apply(json.loads)
     models = annotations\
         .apply(ash.remove_scaling)\
-        .apply(pa.parse_annotation)
+        .apply(pa.parse_annotation)\
+        .apply(sanitize_model)
     spirals = models.apply(lambda d: d.get('spiral', None))
     geoms = pd.DataFrame(
         models.apply(get_geoms).values.tolist(),
         columns=('disk', 'bulge', 'bar')
     )
-    geoms['spirals'] = spirals
 
-    drawn_arms = gu.get_drawn_arms(subject_id, gu.classifications)
-
-    arms = get_spiral_arms(subject_id)
     logsps = [arm.reprojected_log_spiral for arm in arms]
 
     disk_cluster_geoms = geoms['disk'][cluster_masks[0]]
@@ -226,51 +266,52 @@ def plot_aggregation(subject_id, model=None, cluster_masks=None, arms=None):
         return ash.transform_val(v, pic_array.shape[0],
                                  gal['PETRO_THETA'].iloc[0])
 
-    # fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(
-    #     ncols=2, nrows=2,
-    #     figsize=(10, 10),
-    #     sharex=True, sharey=True
-    # )
-    # imshow_kwargs = {
-    #     'cmap': 'gray',
-    #     'origin': 'lower',
-    #     'extent': [tv(0), tv(pic_array.shape[0])]*2,
-    # }
-    # ax0.imshow(pic_array, **imshow_kwargs)
-    # for comp in geoms['disk'].values:
-    #     if comp is not None:
-    #         ax0.add_patch(
-    #             PolygonPatch(ts(comp), fc='C0', ec='k',
-    #                          alpha=0.2, zorder=3)
-    #         )
-    # ax1.imshow(pic_array, **imshow_kwargs)
-    # for comp in geoms['bulge'].values:
-    #     if comp is not None:
-    #         ax1.add_patch(
-    #             PolygonPatch(ts(comp), fc='C1', ec='k',
-    #                          alpha=0.5, zorder=3)
-    #         )
-    # ax2.imshow(pic_array, **imshow_kwargs)
-    # for comp in geoms['bar'].values:
-    #     if comp is not None:
-    #         ax2.add_patch(
-    #             PolygonPatch(ts(comp), fc='C2', ec='k',
-    #                          alpha=0.2, zorder=3)
-    #         )
-    # ax3.imshow(pic_array, **imshow_kwargs)
-    # for arm in drawn_arms:
-    #     ax3.plot(*tv(arm).T)
-    #
-    # for i, ax in enumerate((ax0, ax1, ax2, ax3)):
-    #     ax.set_xlim(imshow_kwargs['extent'][:2])
-    #     ax.set_ylim(imshow_kwargs['extent'][2:])
-    #     if i % 2 == 0:
-    #         ax.set_ylabel('Arcseconds from center')
-    #     if i > 1:
-    #         ax.set_xlabel('Arcseconds from center')
-    # fig.subplots_adjust(wspace=0.05, hspace=0.05)
-    # plt.savefig('drawn_shapes/{}.pdf'.format(subject_id), bbox_inches='tight')
-    # plt.close()
+    imshow_kwargs = {
+        'cmap': 'gray',
+        'origin': 'lower',
+        'extent': [tv(0), tv(pic_array.shape[0])]*2,
+    }
+    fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(
+        ncols=2, nrows=2,
+        figsize=(10, 10),
+        sharex=True, sharey=True
+    )
+    ax0.imshow(pic_array, **imshow_kwargs)
+    for comp in geoms['disk'].values:
+        if comp is not None:
+            ax0.add_patch(
+                PolygonPatch(ts(comp), fc='C0', ec='k',
+                             alpha=0.2, zorder=3)
+            )
+    ax1.imshow(pic_array, **imshow_kwargs)
+    for comp in geoms['bulge'].values:
+        if comp is not None:
+            ax1.add_patch(
+                PolygonPatch(ts(comp), fc='C1', ec='k',
+                             alpha=0.5, zorder=3)
+            )
+    ax2.imshow(pic_array, **imshow_kwargs)
+    for comp in geoms['bar'].values:
+        if comp is not None:
+            ax2.add_patch(
+                PolygonPatch(ts(comp), fc='C2', ec='k',
+                             alpha=0.2, zorder=3)
+            )
+    ax3.imshow(pic_array, **imshow_kwargs)
+    for arm in arms:
+        for a in arm.arms:
+            ax3.plot(*tv(a).T)
+
+    for i, ax in enumerate((ax0, ax1, ax2, ax3)):
+        ax.set_xlim(imshow_kwargs['extent'][:2])
+        ax.set_ylim(imshow_kwargs['extent'][2:])
+        if i % 2 == 0:
+            ax.set_ylabel('Arcseconds from center')
+        if i > 1:
+            ax.set_xlabel('Arcseconds from center')
+    fig.subplots_adjust(wspace=0.05, hspace=0.05)
+    plt.savefig('drawn_shapes/{}.pdf'.format(subject_id), bbox_inches='tight')
+    plt.close()
 
     fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(
         ncols=2, nrows=2,
@@ -359,9 +400,34 @@ def plot_aggregation(subject_id, model=None, cluster_masks=None, arms=None):
 if __name__ == '__main__':
     sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
     to_iter = sid_list
-    bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
+    bar = Bar('Calculating models', max=len(to_iter),
+              suffix='%(percent).1f%% - %(eta)ds')
     for subject_id in to_iter:
         model, cluster_masks, arms = make_model(subject_id)
         plot_aggregation(subject_id, model, cluster_masks, arms)
         bar.next()
     bar.finish()
+    gzb_model_df = []
+    for f in os.listdir('cluster-output'):
+        model_comps = {
+            'subject_id': int(
+                re.match(r'([0-9]+)\.json', f).group(1)
+            ),
+        }
+        if not re.match(r'[0-9]+\.json', f):
+            continue
+        with open(os.path.join('cluster-output', f)) as model_file:
+            model = json.load(model_file)
+        for key in ('disk', 'bulge', 'bar'):
+            if model.get(key, None) is None:
+                model[key] = {}
+            mu = model[key].get('mu', (np.nan, np.nan))
+            model_comps['{}-mux'.format(key)] = mu[0]
+            model_comps['{}-muy'.format(key)] = mu[1]
+            for param in ('roll', 'rEff', 'axRatio', 'i0', 'n', 'c'):
+                model_comps['{}-{}'.format(key, param)] = (
+                    model[key].get(param, np.nan)
+                )
+        gzb_model_df.append(model_comps)
+    gzb_model_df = pd.DataFrame(gzb_model_df).set_index('subject_id')
+    gzb_model_df.to_pickle('galaxy-builder-aggregate-models.pickle')

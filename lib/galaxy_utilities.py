@@ -1,17 +1,3 @@
-# # Spiral extraction methodology
-#
-# 1. Obtain Sersic parameters of galaxy from NSA catalog
-# 2. Translate the Sersic $\phi$ into zooniverse image coordinates
-#     - Need to re-create the transforms used to generate the image for
-#       volunteers (due to poor decision making in the subject creation
-#       process)
-# 2. Cluster drawn poly-lines
-#     1. Deproject drawn arms
-#     2. Cluster using DBSCAN and a custom metric
-#     3. Use Local Outlier Factor to clean points
-#     5. Sort points in cluster
-#     6. Fit a smoothing spline to ordered points
-# 3. Calculate pitch angles for the resulting spline fits
 import os
 import re
 from tempfile import NamedTemporaryFile
@@ -22,8 +8,7 @@ import requests
 import subprocess
 from PIL import Image
 from skimage.transform import rotate, rescale
-from gzbuilderspirals import get_drawn_arms
-from gzbuilderspirals.galaxySpirals import GalaxySpirals
+from gzbuilderspirals import get_drawn_arms as __get_drawn_arms
 from gzbuilderspirals import deprojecting as dpj
 from shapely.geometry import box, Point
 from shapely.affinity import rotate as shapely_rotate, scale as shapely_scale
@@ -51,6 +36,11 @@ classifications = pd.read_csv(
 subjects = pd.read_csv(
     get_path('../classifications/galaxy-builder-subjects_24-1-19.csv')
 )
+
+try:
+    subject_images = pd.read_pickle(get_path('subject_images.pkl'))
+except FileNotFoundError:
+    subject_images = None
 
 # Some galaxies were montaged when created. Create a list of their coordinates
 # for use later
@@ -121,6 +111,10 @@ def get_galaxy_and_angle(id, imShape=(512, 512)):
     return gal, angle
 
 
+def get_drawn_arms(subject_id, classifications=classifications):
+    return np.array(__get_drawn_arms(subject_id, classifications))
+
+
 def get_ds9_region(gal, fits_name):
     s = """# Region file format: DS9 version 4.1
     global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" \
@@ -161,18 +155,21 @@ def getUrl(id):
 def get_image(gal, id, angle):
     # We'll now download the Zooniverse image that volunteers actually
     # classified on
-    url = getUrl(id)
-    imgData = requests.get(url).content
+    if not os.path.isfile(get_path('images/{}.png'.format(id))):
+        url = getUrl(id)
+        imgData = requests.get(url).content
 
-    f = NamedTemporaryFile(
-        suffix='.{}'.format(url.split('.')[-1]),
-        delete=False
-    )
-    f.write(imgData)
-    f.close()
-    pic = Image.open(f.name)
-    os.unlink(f.name)
-
+        f = NamedTemporaryFile(
+            suffix='.{}'.format(url.split('.')[-1]),
+            delete=False
+        )
+        f.write(imgData)
+        f.close()
+        pic = Image.open(f.name)
+        os.unlink(f.name)
+        pic.save(get_path('images/{}.png'.format(id)))
+    else:
+        pic = Image.open(get_path('images/{}.png'.format(id)))
     # Grab the data arrays from the Image objects, and imshow the images (for
     # debugging purposes)
     picArray = np.array(pic)
@@ -180,6 +177,30 @@ def get_image(gal, id, angle):
     # Now deproject the image of the galaxy:
     deprojectedImage = dpj.deproject_array(picArray, angle, gal['PETRO_BA90'].iloc[0])
     return picArray, deprojectedImage
+
+
+def save_images():
+    df_subjects = subjects.set_index('subject_id')
+    urls = df_subjects.locations.apply(eval).apply(lambda v: dict.get(v, '1', None)).dropna()
+
+    def get_zoo_image(url):
+        if url.split('.')[-1].lower() not in ('png', 'jpeg', 'jpg'):
+            return None
+        imgData = requests.get(url).content
+        f = NamedTemporaryFile(
+            suffix='.{}'.format(url.split('.')[-1]),
+            delete=False
+        )
+        f.write(imgData)
+        f.close()
+        pic = Image.open(f.name)
+        os.unlink(f.name)
+        return pic
+
+    for id, url in urls.items():
+        pic = get_zoo_image(url)
+        if pic is not None:
+            pic.save(get_path('images/{}.png'.format(id)))
 
 
 def get_image_data(subject_id):

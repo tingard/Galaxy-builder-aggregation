@@ -6,11 +6,19 @@ from astropy.io import fits
 import requests
 
 
+def get_pnonebulge(gal):
+    none = gal['t05_bulge_prominence_a10_no_bulge_debiased']
+    # just = gal['t05_bulge_prominence_a11_just_noticeable_debiased'],
+    # obvious = gal['t05_bulge_prominence_a12_obvious_debiased'],
+    # dominant = gal['t05_bulge_prominence_a13_dominant_debiased'],
+    return none
+
+
 def get_pbulge(gal):
-    none = gal['t05_bulge_prominence_a10_no_bulge_debiased'],
-    just = gal['t05_bulge_prominence_a11_just_noticeable_debiased'],
-    obvious = gal['t05_bulge_prominence_a12_obvious_debiased'],
-    dominant = gal['t05_bulge_prominence_a13_dominant_debiased'],
+    none = gal['t05_bulge_prominence_a10_no_bulge_debiased']
+    just = gal['t05_bulge_prominence_a11_just_noticeable_debiased']
+    obvious = gal['t05_bulge_prominence_a12_obvious_debiased']
+    dominant = gal['t05_bulge_prominence_a13_dominant_debiased']
     return none + just < obvious + dominant
 
 
@@ -21,8 +29,7 @@ def get_pbar(gal):
 
 skyserver_url = '/'.join((
     'http://skyserver.sdss.org',
-    'dr13', 'en','tools', 'search',
-    'x_results.aspx'
+    'dr13', 'en', 'tools', 'search', 'x_results.aspx',
 ))
 
 
@@ -31,7 +38,9 @@ def get_dr8_id(dr7id):
         'searchtool': 'SQL',
         'TaskName': 'Skyserver.Search.SQL',
         'syntax': 'NoSyntax',
-        'cmd': 'SELECT dr8objid FROM PhotoObjDR7 WHERE dr7objid = {}'.format(dr7id),
+        'cmd': 'SELECT dr8objid FROM PhotoObjDR7 WHERE dr7objid = {}'.format(
+            dr7id
+        ),
         'format': 'json',
         'TableName': '',
     }
@@ -43,10 +52,13 @@ def get_dr8_id(dr7id):
     return res[0]['Rows'][0]['dr8objid'] if len(res[0]['Rows']) > 0 else np.nan
 
 
-sandor_bars = pd.read_csv('Kruk2018_Table2_Table3.csv')
+def has_comp(annotation, comp=0):
+    try:
+        drawn_shapes = annotation[comp]['value'][0]['value']
+        return len(drawn_shapes) > 0
+    except (IndexError, KeyError):
+        return False
 
-with open('tmp_cls_dump.json') as f:
-    classifications = json.load(f)
 
 # open the GZ2 catalogue
 NSA_GZ = fits.open('./lib/NSA_GalaxyZoo.fits')
@@ -56,43 +68,41 @@ bulge_fractions = []
 bar_fractions = []
 bar_lengths = []
 for subject_id in available_sids:
-    cls_for_s = [c for c in classifications
-                 if str(subject_id) in c['links']['subjects']]
-
+    cls_for_s = gu.classifications.query(
+        '(subject_ids == {}) & (workflow_version == 61.107)'.format(
+            subject_id
+        )
+    )
+    ann_for_s = cls_for_s['annotations'].apply(json.loads)
     metadata = gu.meta_map.get(int(subject_id), {})
     gal = NSA_GZ[1].data[
         NSA_GZ[1].data['dr7objid'] == np.int64(metadata['SDSS dr7 id'])
     ]
     if len(gal) != 1:
-        print('Could not find object for id {}'.format(metadata['SDSS dr7 id']))
+        print('Could not find object for id {}'.format(
+            metadata['SDSS dr7 id'])
+        )
         bulge_fractions.append((np.nan, np.nan))
         bar_fractions.append((np.nan, np.nan))
     else:
         # how frequently do people draw bulges?
-        has_bulge = []
-        for c in cls_for_s:
-            try:
-                has_bulge.append(len(c['annotations'][1]['value'][0]['value']))
-            except IndexError:
-                pass
-
+        gzb_bulge = ann_for_s.apply(
+            lambda v: has_comp(v, comp=1)
+        ).sum() / len(ann_for_s)
         gz2_bulge = get_pbulge(gal[0])
-        bulge_fractions.append((sum(has_bulge) / len(has_bulge), gz2_bulge))
+        gz2_no_bulge = get_pnonebulge(gal[0])
+        bulge_fractions.append((gzb_bulge, gz2_bulge, gz2_no_bulge))
 
-        # and onto the bars
-        has_bar = []
-        for c in cls_for_s:
-            try:
-                has_bar.append(len(c['annotations'][2]['value'][0]['value']))
-            except IndexError:
-                pass
+        gzb_bar = ann_for_s.apply(
+            lambda v: has_comp(v, comp=2)
+        ).sum() / len(ann_for_s)
         gz2_pbar = get_pbar(gal[0])
-        bar_fractions.append((sum(has_bar) / len(has_bar), gz2_pbar))
+        bar_fractions.append((gzb_bar, gz2_pbar))
 
     with open('cluster-output/{}.json'.format(subject_id)) as f:
         model = json.load(f)
     if model['bar'] is not None:
-        bar_length = model['bar']['width']
+        bar_length = model['bar']['rEff']
     else:
         bar_length = np.nan
     bar_lengths.append(bar_length)
@@ -100,7 +110,7 @@ for subject_id in available_sids:
 len(available_sids), len(bulge_fractions), len(bar_fractions), len(bar_lengths)
 bulge_df = pd.DataFrame(
     bulge_fractions,
-    columns=('GZB fraction', 'GZ2 bulge dominated'),
+    columns=('GZB fraction', 'GZ2 bulge dominated', 'GZ2 no bulge'),
     index=pd.Series(available_sids, name='subject_id'),
 )
 bulge_df.to_pickle('bulge_fractions.pkl')

@@ -16,6 +16,7 @@ nsa_keys = (
     'PETRO_BA90', 'PETRO_PHI90', # petrosean photometry at 90% light radius
     'PETRO_BA50', 'PETRO_PHI50', # ... at 50% light radius
     'RUN', 'CAMCOL', 'FIELD', 'RERUN',
+    'ELPETRO_MASS', 'SERSIC_MASS',
 )
 
 pd.DataFrame(

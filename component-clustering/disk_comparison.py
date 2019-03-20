@@ -63,7 +63,13 @@ def get_gzb_axis_ratios():
         else:
             components = {}
         disk = components.get('disk', {})
-        axRatio = disk.get('axRatio', np.nan) if disk is not None else np.nan
+        disk = {} if disk is None else disk
+        if disk.get('axRatio', False):
+            axRatio = disk.get('axRatio', np.nan) if disk is not None else np.nan
+        else:
+            rx = disk.get('rx', np.nan)
+            ry = disk.get('ry', np.nan)
+            axRatio = min(rx, ry) / max(rx, ry)
         if axRatio > 0.95:
             print(sid);
         axr.append(axRatio)

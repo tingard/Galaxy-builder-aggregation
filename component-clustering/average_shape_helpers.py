@@ -74,11 +74,24 @@ def cluster_comp(comp_geoms, eps, min_samples):
 
 
 def sanitize_param_dict(p):
+    # rEff > 0
+    # 0 < axRatio < 1
+    # 0 < roll < np.pi (not 2*pi due to rotational symmetry)
     out = {k: v for k, v in p.items()}
-    out['rEff'] *= (p['axRatio'] if p['axRatio'] > 1 else 1)
-    out['axRatio'] = min(p['axRatio'], 1 / p['axRatio'])
+    out['rEff'] = (
+        abs(out['rEff'])
+        * (abs(p['axRatio']) if abs(p['axRatio']) > 1 else 1)
+    )
+    out['axRatio'] = min(abs(p['axRatio']), 1 / abs(p['axRatio']))
     out['roll'] = p['roll'] % np.pi
     return out
+
+
+def get_param_list(d):
+    if d is None:
+        d = {}
+    return [*d.get('mu', (0, 0)), d.get('rEff', 5), d.get('axRatio', 0.7),
+            d.get('roll', 0)]
 
 
 def get_param_dict(p):
