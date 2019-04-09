@@ -4,27 +4,26 @@ import numpy as np
 from scipy.optimize import minimize_scalar
 from sklearn.cluster import DBSCAN
 import pandas as pd
-import matplotlib.pyplot as plt
 from astropy.io import fits
 import wrangle_classifications as wc
 import lib.galaxy_utilities as gu
 import lib.python_model_renderer.parse_annotation as pa
-import wrangle_classifications as wc
 import average_shape_helpers as ash
 import get_average_shape as gas
-from progress.bar import Bar
 import warnings
 from astropy.utils.exceptions import AstropyWarning
 warnings.simplefilter('ignore', category=AstropyWarning)
+
 
 def get_pbar(gal):
     n = gal['t03_bar_a06_bar_debiased'] + gal['t03_bar_a07_no_bar_debiased']
     return gal['t03_bar_a06_bar_debiased'] / n
 
+
 NSA_GZ = fits.open('./lib/NSA_GalaxyZoo.fits')
 
 sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
-to_iter =  sid_list
+to_iter = sid_list
 geom_dict = {}
 gz2_pbar = {}
 all_distances = {}
@@ -48,7 +47,9 @@ for subject_id in to_iter:
     )
     geoms['spirals'] = spirals
     geom_dict[subject_id] = geoms
-    all_distances[subject_id] = wc.gen_jaccard_distances(geoms['bar'].dropna().values)
+    all_distances[subject_id] = wc.gen_jaccard_distances(
+        geoms['bar'].dropna().values
+    )
 
 
 def func(eps):
@@ -66,6 +67,7 @@ def func(eps):
             # gz2 says very likely to have a bar, and we have a bar
             c -= 1
     return c
+
 
 res = minimize_scalar(func, bracket=(1E-4, 0.4, 2))
 

@@ -30,11 +30,11 @@ def make_ellipse(comp):
             yfact=comp['rEff'] * comp['axRatio']
         ),
         -np.rad2deg(comp['roll'])
-    ) if comp is not None else None
+    ) if comp else None
 
 
 def make_box(comp):
-    if comp is None or comp['axRatio'] == 0:
+    if not comp or comp['axRatio'] == 0:
         return None
     return shapely_rotate(
         box(
@@ -128,8 +128,8 @@ def transform_shape(shape, npix, petro_theta):
 
 
 def sanitize_comp_for_json(comp):
-    if comp is None:
+    if not comp:
         return None
     elif type(comp['mu']) != list:
-        return {**comp, 'mu': comp['mu'].tolist()} if comp is not None else None
+        return {**comp, 'mu': comp['mu'].tolist()} if comp else None
     return comp

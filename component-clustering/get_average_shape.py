@@ -96,56 +96,12 @@ def aggregate_comp_mean(comps):
     return out
 
 
-def get_spiral_arms(subject_id, should_recreate=True):
-    if (
-        (not os.path.exists('lib/pipelines/{}.json'.format(subject_id)))
-        or should_recreate
-    ):
-        gal, angle = gu.get_galaxy_and_angle(subject_id)
-        drawn_arms = gu.get_drawn_arms(subject_id, gu.classifications)
-        distances = None
-        p = Pipeline(drawn_arms, phi=angle, ba=gal['PETRO_BA90'],
-                     image_size=512, distances=distances, parallel=True)
-        p.save('lib/pipelines/{}.json'.format(subject_id))
-        arms = p.get_arms()
-        for i, arm in enumerate(arms):
-            arm.save('lib/spiral_arms/{}-{}'.format(subject_id, i))
-        return arms
-    else:
-        arm_files = [
-            os.path.join('lib/spiral_arms', i)
-            for i in os.listdir('lib/spiral_arms')
-            if str(subject_id) in i
-        ]
-        return [Arm.load(a) for a in arm_files]
-
-
-def make_model(subject_id):
-    annotations = gu.classifications[
-        gu.classifications['subject_ids'] == subject_id
-    ]['annotations'].apply(json.loads)
-    models = annotations\
-        .apply(ash.remove_scaling)\
-        .apply(pa.parse_annotation)\
-        .apply(sanitize_model)
-    spirals = models.apply(lambda d: d.get('spiral', None))
-    geoms = pd.DataFrame(
-        models.apply(get_geoms).values.tolist(),
-        columns=('disk', 'bulge', 'bar')
-    )
-    geoms['spirals'] = spirals
-
-    labels = list(map(np.array, cluster_components(geoms)))
+def get_aggregate_components(geoms, models, labels):
     cluster_labels = list(map(ash.largest_cluster_label, labels))
     cluster_masks = [a == b for a, b in zip(labels, cluster_labels)]
-
-    fpath = 'cluster_masks/{}.npy'.format(subject_id)
-    np.save(fpath, cluster_masks)
-
     disk_cluster_geoms = geoms['disk'][cluster_masks[0]]
     bulge_cluster_geoms = geoms['bulge'][cluster_masks[1]]
     bar_cluster_geoms = geoms['bar'][cluster_masks[2]]
-
     # calculate an aggregate disk
     if not np.any(labels[0] == cluster_labels[0]):
         aggregate_disk = None
@@ -195,6 +151,57 @@ def make_model(subject_id):
                 constructor_func=ash.box_from_param_list,
             )
         }
+    return aggregate_disk, aggregate_bulge, aggregate_bar
+
+
+def get_spiral_arms(subject_id, should_recreate=True):
+    if (
+        (not os.path.exists('lib/pipelines/{}.json'.format(subject_id)))
+        or should_recreate
+    ):
+        gal, angle = gu.get_galaxy_and_angle(subject_id)
+        drawn_arms = gu.get_drawn_arms(subject_id, gu.classifications)
+        p = Pipeline(drawn_arms, phi=angle, ba=gal['PETRO_BA90'],
+                     image_size=512, parallel=True)
+        p.save('lib/pipelines/{}.json'.format(subject_id))
+        arms = p.get_arms()
+        for i, arm in enumerate(arms):
+            arm.save('lib/spiral_arms/{}-{}'.format(subject_id, i))
+        return arms
+    else:
+        arm_files = [
+            os.path.join('lib/spiral_arms', i)
+            for i in os.listdir('lib/spiral_arms')
+            if str(subject_id) in i
+        ]
+        return [Arm.load(a) for a in arm_files]
+
+
+def make_model(subject_id):
+    annotations = gu.classifications[
+        gu.classifications['subject_ids'] == subject_id
+    ]['annotations'].apply(json.loads)
+    models = annotations\
+        .apply(ash.remove_scaling)\
+        .apply(pa.parse_annotation)\
+        .apply(sanitize_model)
+    spirals = models.apply(lambda d: d.get('spiral', None))
+    geoms = pd.DataFrame(
+        models.apply(get_geoms).values.tolist(),
+        columns=('disk', 'bulge', 'bar')
+    )
+    geoms['spirals'] = spirals
+
+    labels = list(map(np.array, cluster_components(geoms)))
+    cluster_labels = list(map(ash.largest_cluster_label, labels))
+    cluster_masks = [a == b for a, b in zip(labels, cluster_labels)]
+
+    fpath = 'cluster_masks/{}.npy'.format(subject_id)
+    np.save(fpath, cluster_masks)
+
+    aggregate_disk, aggregate_bulge, aggregate_bar = get_aggregate_components(
+        geoms, models, labels
+    )
 
     arms = get_spiral_arms(subject_id, should_recreate=False)
     logsps = [arm.reprojected_log_spiral for arm in arms]
@@ -278,21 +285,21 @@ def plot_aggregation(subject_id, model=None, cluster_masks=None, arms=None):
     )
     ax0.imshow(pic_array, **imshow_kwargs)
     for comp in geoms['disk'].values:
-        if comp is not None:
+        if comp:
             ax0.add_patch(
                 PolygonPatch(ts(comp), fc='C0', ec='k',
                              alpha=0.2, zorder=3)
             )
     ax1.imshow(pic_array, **imshow_kwargs)
     for comp in geoms['bulge'].values:
-        if comp is not None:
+        if comp:
             ax1.add_patch(
                 PolygonPatch(ts(comp), fc='C1', ec='k',
                              alpha=0.5, zorder=3)
             )
     ax2.imshow(pic_array, **imshow_kwargs)
     for comp in geoms['bar'].values:
-        if comp is not None:
+        if comp:
             ax2.add_patch(
                 PolygonPatch(ts(comp), fc='C2', ec='k',
                              alpha=0.2, zorder=3)
@@ -397,16 +404,7 @@ def plot_aggregation(subject_id, model=None, cluster_masks=None, arms=None):
     plt.close()
 
 
-if __name__ == '__main__':
-    sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
-    to_iter = sid_list
-    bar = Bar('Calculating models', max=len(to_iter),
-              suffix='%(percent).1f%% - %(eta)ds')
-    for subject_id in to_iter:
-        model, cluster_masks, arms = make_model(subject_id)
-        plot_aggregation(subject_id, model, cluster_masks, arms)
-        bar.next()
-    bar.finish()
+def make_dataframe():
     gzb_model_df = []
     for f in os.listdir('cluster-output'):
         model_comps = {
@@ -431,3 +429,16 @@ if __name__ == '__main__':
         gzb_model_df.append(model_comps)
     gzb_model_df = pd.DataFrame(gzb_model_df).set_index('subject_id')
     gzb_model_df.to_pickle('galaxy-builder-aggregate-models.pickle')
+
+
+if __name__ == '__main__':
+    sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
+    to_iter = sid_list
+    bar = Bar('Calculating models', max=len(to_iter),
+              suffix='%(percent).1f%% - %(eta)ds')
+    for subject_id in to_iter:
+        model, cluster_masks, arms = make_model(subject_id)
+        plot_aggregation(subject_id, model, cluster_masks, arms)
+        bar.next()
+    bar.finish()
+    make_dataframe()
