@@ -67,6 +67,8 @@ def main(mangaid, subject_id):
     df = df.dropna()
     df['R-arcsec'] = df['R']
     df['R'] = unit_converter(df['R'])
+    scale = 4 * float(gal['PETRO_THETA'])
+    zoo_coords_r = df['R-arcsec'].values / scale
     keys = (
         'GAS_IC-V',
         'GAS___-V',
@@ -144,8 +146,6 @@ def main(mangaid, subject_id):
     plt.savefig('{}_shear.pdf'.format(mangaid), bbox_inches='tight')
     plt.close()
 
-    scale = 4 * float(gal['PETRO_THETA'])
-    zoo_coords_r = df['R-arcsec'].values / scale
     np.save('pavr', np.stack((zoo_coords_r, sa_pas[0]), axis=1))
 
     imshow_kwargs = {

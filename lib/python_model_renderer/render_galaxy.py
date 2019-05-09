@@ -1,4 +1,5 @@
 import numpy as np
+from copy import deepcopy
 from scipy.signal import convolve2d
 import matplotlib.pyplot as plt
 from shapely.geometry import LineString, MultiPoint
@@ -129,9 +130,9 @@ def spiral_distance_numpy(points, poly_line, output_shape=(256, 256)):
     ).reshape(*output_shape)
 
 
-@jit(nopython=True, fastmath=True)
-def spiral_distance_numba(poly_line, output_shape=(250, 250)):
-    distances = np.zeros(output_shape)
+@jit(nopython=True, fastmath=True, parallel=True)
+def spiral_distance_numba(poly_line, distances=np.zeros((250, 250))):
+    output_shape = distances.shape
     for i in range(output_shape[0]):
         for j in range(output_shape[1]):
             best = 1E30
@@ -155,7 +156,7 @@ def spiral_distance_numba(poly_line, output_shape=(250, 250)):
 
 
 def spiral_arm(arm_points, params=default_spiral, disk=default_disk,
-               image_size=512, point_list=None):
+               image_size=512):
     if disk is None or len(arm_points) < 2:
         return np.zeros((image_size, image_size))
 
@@ -168,7 +169,7 @@ def spiral_arm(arm_points, params=default_spiral, disk=default_disk,
 
     arm_distances = spiral_distance_numba(
         arm_points,
-        output_shape=disk_arr.shape
+        distances=np.zeros(disk_arr.shape),
     )
 
     return (
@@ -178,8 +179,7 @@ def spiral_arm(arm_points, params=default_spiral, disk=default_disk,
     )
 
 
-def calculate_model(parsed_annotation, image_size, oversample_n=5,
-                  point_list=None):
+def calculate_model(parsed_annotation, image_size, oversample_n=5):
     disk_arr = sersic_comp(parsed_annotation['disk'],
                            image_size=image_size,
                            oversample_n=oversample_n)
@@ -195,7 +195,6 @@ def calculate_model(parsed_annotation, image_size, oversample_n=5,
             *s,
             parsed_annotation['disk'],
             image_size=image_size,
-            point_list=point_list
         )
         for s in parsed_annotation['spiral']
     ])
@@ -204,17 +203,25 @@ def calculate_model(parsed_annotation, image_size, oversample_n=5,
 
 
 # 0.8 multiplier was present in the original rendering code
-def compare_to_galaxy(arr, psf, galaxy):
-    return asinh_stretch(
-        0.8 * galaxy - convolve2d(arr, psf, mode='same', boundary='symm')
+def compare_to_galaxy(arr, psf, galaxy, pixel_mask=None, stretch=True):
+    if pixel_mask is None:
+        pixel_mask = np.ones_like(arr)
+    D = (
+        0.8 * galaxy * pixel_mask
+        - convolve2d(arr, psf, mode='same', boundary='symm') * pixel_mask
     )
-
+    return asinh_stretch(D) if stretch else D
 
 def post_process(arr, psf):
     return asinh_stretch(
         convolve2d(arr, psf, mode='same', boundary='symm'),
         0.5
     )
+
+
+def GZB_score(D):
+    N = np.multiply.reduce(D.shape)
+    return 100 * np.exp(-300 / N * np.sum(asinh(np.abs(D) / 0.6)**2 / asinh(0.6)))
 
 
 def plot_model(model, psf, galaxy_data, imshow_kwargs, **kwargs):
@@ -250,3 +257,27 @@ def plot_model(model, psf, galaxy_data, imshow_kwargs, **kwargs):
     plt.xlabel(kwargs.get('xlabel', 'Arcseconds from galaxy centre'))
     plt.ylabel(kwargs.get('ylabel', 'Arcseconds from galaxy centre'))
     return difference_data
+
+
+def sanitize_model(m):
+    return {'spiral': m['spiral'], **{
+        k: sanitize_param_dict(v)
+        for k, v in m.items()
+        if k is not 'spiral'
+    }}
+
+
+def sanitize_param_dict(p):
+    if p is None:
+        return p
+    # rEff > 0
+    # 0 < axRatio < 1
+    # 0 < roll < np.pi (not 2*pi due to rotational symmetry)
+    out = deepcopy(p)
+    out['rEff'] = (
+        abs(out['rEff'])
+        * (abs(p['axRatio']) if abs(p['axRatio']) > 1 else 1)
+    )
+    out['axRatio'] = min(abs(p['axRatio']), 1 / abs(p['axRatio']))
+    out['roll'] = p['roll'] % np.pi
+    return out

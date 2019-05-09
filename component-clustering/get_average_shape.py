@@ -11,7 +11,7 @@ from gzbuilderspirals.oo import Pipeline, Arm
 import wrangle_classifications as wc
 import lib.galaxy_utilities as gu
 import lib.python_model_renderer.parse_annotation as pa
-import average_shape_helpers as ash
+import lib.average_shape_helpers as ash
 from progress.bar import Bar
 import warnings
 from astropy.utils.exceptions import AstropyWarning

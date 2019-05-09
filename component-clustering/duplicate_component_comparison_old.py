@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import lib.galaxy_utilities as gu
-import average_shape_helpers as ash
+import lib.average_shape_helpers as ash
 from gzbuilderspirals.oo import Pipeline, Arm
 from progress.bar import Bar
 import argparse

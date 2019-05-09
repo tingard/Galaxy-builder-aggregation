@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import lib.galaxy_utilities as gu
 import lib.python_model_renderer.parse_annotation as pa
 import lib.python_model_renderer.render_galaxy as rg
+from sklearn.metrics import mean_squared_error
 from shapely.geometry import Point, box
 from shapely.affinity import rotate as shapely_rotate
 from shapely.affinity import scale as shapely_scale
@@ -85,13 +86,12 @@ def plot_residuals(residuals, galaxy_data, blank_data):
 
 
 def plot_model(model_data, galaxy_data, psf, model_details, pixel_mask,
-               imshow_kwargs, transform_coords, transform_patch):
+               imshow_kwargs, transform_coords, transform_patch, best_cls):
     image_data = rg.asinh_stretch(galaxy_data)
     difference_data = rg.compare_to_galaxy(model_data, psf, galaxy_data) * pixel_mask
-
     diff = 0.8 * galaxy_data - rg.convolve2d(model_data, psf, mode='same', boundary='symm')
     diff *= pixel_mask
-    score = __score(diff)
+    score = rg.GZB_score(diff)
     scaled_model_data = rg.post_process(model_data, psf)
 
     disk, bulge, bar = get_geoms(model_details)
@@ -123,7 +123,6 @@ def plot_model(model_data, galaxy_data, psf, model_details, pixel_mask,
     plt.subplots_adjust(right=0.9, wspace=0.1, hspace=0)
     cax = fig.add_axes([0.91, 0.14, 0.02, 0.73])
     plt.colorbar(panel0, cax=cax)
-
     # add a shared x-axis label and y-axis label
     fig.add_subplot(111, frameon=False)
     # hide tick and tick label of the big axes
@@ -132,69 +131,83 @@ def plot_model(model_data, galaxy_data, psf, model_details, pixel_mask,
     plt.grid(False)
     plt.xlabel('Arcseconds from galaxy centre')
     plt.ylabel('Arcseconds from galaxy centre')
-    plt.suptitle('Model score: {:.2f}'.format(score))
+    plt.suptitle('User: {}. Model score: {:.2f}'.format(
+        best_cls['user_name'], score
+    ))
 
 
-verbose = False
-to_iter = np.loadtxt('lib/subject-id-list.csv', dtype='u8')
-bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
-for subject_id in to_iter:
-    if verbose:
-        print('Working on', subject_id)
-    annotations = gu.classifications[
-        gu.classifications['subject_ids'] == subject_id
-    ]['annotations'].apply(json.loads).values.tolist()
-    gal, angle = gu.get_galaxy_and_angle(subject_id)
-    pic_array, deprojected_image = gu.get_image(gal, subject_id, angle)
+def get_best_classification(subject_id, should_plot=False, should_save=False):
+    # grab all the required metadata for this galaxy
     psf = gu.get_psf(subject_id)
     diff_data = gu.get_image_data(subject_id)
-    pixel_mask = 1 - np.array(diff_data['mask'])
+    pixel_mask = 1 - np.array(diff_data['mask'])[::-1]
     galaxy_data = np.array(diff_data['imageData'])[::-1]
     size_diff = diff_data['width'] / diff_data['imageWidth']
-    # arcseconds per pixel for zooniverse image
-    pix_size = pic_array.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4)
-    # arcseconds per pixel for galaxy data
-    pix_size2 = galaxy_data.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4)
 
-    imshow_kwargs = {
-        'cmap': 'gray_r', 'origin': 'lower',
-        'extent': (
-            # left of image in arcseconds from centre
-            -pic_array.shape[0]/2 / pix_size,
-            pic_array.shape[0]/2 / pix_size,  # right...
-            -pic_array.shape[1]/2 / pix_size,  # bottom...
-            pic_array.shape[1]/2 / pix_size  # top...
-        ),
-    }
+    def _lf(rendered_model, y=galaxy_data):
+        Y = rg.convolve2d(rendered_model, psf, mode='same', boundary='symm') * pixel_mask
+        return mean_squared_error(Y.flatten(), 0.8 * (y * pixel_mask).flatten())
 
-    tc, tp = make_transforms(galaxy_data, pix_size2)
-
-    residuals = np.zeros(len(annotations))
-    model_array = np.zeros(
-        (len(annotations), diff_data['width'], diff_data['width'])
+    classifications = gu.classifications.query(
+        'subject_ids == {}'.format(subject_id)
     )
-    for i, annotation in enumerate(annotations):
-        parsed_annotation = pa.parse_annotation(
-            annotation, size_diff=size_diff
-        )
-        model = rg.calculate_model(parsed_annotation, diff_data['width'])
-        model_array[i] = model
-        difference_data = rg.compare_to_galaxy(model, psf, galaxy_data) * pixel_mask
-        residuals[i] = np.sqrt(np.sum(difference_data**2)) \
-            / np.multiply.reduce(galaxy_data.shape)
-    blank_data = rg.compare_to_galaxy(np.zeros_like(galaxy_data), psf, galaxy_data)
+    annotations = classifications['annotations'].apply(json.loads)
+    models = annotations.apply(pa.parse_annotation, size_diff=size_diff)
+    rendered_models = models.apply(
+        rg.calculate_model,
+        args=(diff_data['width'],)
+    )
+    scores = rendered_models.apply(_lf)
+    best_index = scores.idxmin()
+    best_cls = classifications.loc[best_index]
+    best_model = models.loc[best_index]
+    best_rendered_model = rendered_models.loc[best_index]
 
-    plot_residuals(residuals, galaxy_data, blank_data)
-    plt.savefig('model-scores/{}.pdf'.format(subject_id))
-    plt.close()
+    if should_plot:
+        gal, angle = gu.get_galaxy_and_angle(subject_id)
+        pic_array, deprojected_image = gu.get_image(gal, subject_id, angle)
+        # arcseconds per pixel for zooniverse image
+        pix_size = pic_array.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4)
+        # arcseconds per pixel for galaxy data
+        pix_size2 = galaxy_data.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4)
+        imshow_kwargs = {
+            'cmap': 'gray_r', 'origin': 'lower',
+            'extent': (
+                # left of image in arcseconds from centre
+                -pic_array.shape[0]/2 / pix_size,
+                pic_array.shape[0]/2 / pix_size,  # right...
+                -pic_array.shape[1]/2 / pix_size,  # bottom...
+                pic_array.shape[1]/2 / pix_size  # top...
+            ),
+        }
+        tc, tp = make_transforms(galaxy_data, pix_size2)
+        plot_model(best_rendered_model, galaxy_data, psf, best_model, pixel_mask,
+                   imshow_kwargs, tc, tp, best_cls)
+        plt.savefig('best_residual/{}.pdf'.format(subject_id))
+        plt.close()
+    if should_save:
+        with open('best_annotation/{}.json'.format(subject_id), 'w') as f:
+            f.write(json.dumps(pa.make_json(best_model)))
 
-    best_annotation = annotations[np.argmin(residuals)]
-    best_annotation_parsed = pa.parse_annotation(best_annotation, size_diff=size_diff)
-    model_data = model_array[np.argmin(residuals)]
+    return best_cls
 
-    plot_model(model_data, galaxy_data, psf, best_annotation_parsed, pixel_mask,
-               imshow_kwargs, tc, tp)
-    plt.savefig('best_residual/{}.pdf'.format(subject_id))
-    plt.close()
-    bar.next()
-bar.finish()
+
+if __name__ == '__main__':
+    with open('lib/best-classifications.json') as f:
+        d = json.load(f)
+    done = d.keys()
+    to_iter = np.sort(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
+    bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
+    d = {}
+    try:
+        for subject_id in to_iter:
+            # if subject_id in d.keys():
+            #     continue
+            c = get_best_classification(subject_id, should_plot=True,
+                                        should_save=True)
+            d[str(subject_id)] = int(c.classification_id)
+            bar.next()
+    except KeyboardInterrupt:
+        with open('lib/best-classifications.json', 'w') as f:
+            f.write(json.dumps(d, indent=1))
+    bar.finish()

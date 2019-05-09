@@ -5,11 +5,14 @@ import pandas as pd
 from sklearn.model_selection import ShuffleSplit
 import lib.galaxy_utilities as gu
 import lib.python_model_renderer.parse_annotation as pa
-import average_shape_helpers as ash
+import lib.average_shape_helpers as ash
 import get_average_shape as gas
 from gzbuilderspirals import get_drawn_arms
 from gzbuilderspirals.oo import Pipeline
 from progress.bar import Bar
+import warnings
+from astropy.utils.exceptions import AstropyWarning
+warnings.simplefilter('ignore', category=AstropyWarning)
 
 
 def make_comparison(dr8id, ss_id, val_id):

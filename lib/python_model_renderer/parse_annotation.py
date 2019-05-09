@@ -86,9 +86,12 @@ def parse_annotation(annotation, size_diff=1):
 
 def make_json(parsed_annotation):
     a = deepcopy(parsed_annotation)
-    a['disk']['mu'] = list(parsed_annotation['disk']['mu'])
-    a['bulge']['mu'] = list(parsed_annotation['bulge']['mu'])
-    a['bar']['mu'] = list(parsed_annotation['bar']['mu'])
+    if a['disk'] is not None:
+        a['disk']['mu'] = list(parsed_annotation['disk']['mu'])
+    if a['bulge'] is not None:
+        a['bulge']['mu'] = list(parsed_annotation['bulge']['mu'])
+    if a['bar'] is not None:
+        a['bar']['mu'] = list(parsed_annotation['bar']['mu'])
     a['spiral'] = [
         [s[0].tolist(), s[1]]
         for s in parsed_annotation['spiral']
