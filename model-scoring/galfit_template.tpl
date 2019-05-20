@@ -13,7 +13,7 @@ I) $convolution_box_width    $convolution_box_height             # Size of the c
 J) $photomag_zero                                                # Magnitude photometric zeropoint
 K) $plate_scale_dy  $plate_scale_dx                              # Plate scale (dx dy)    [arcsec per pixel]
 O) $display_type                                                 # Display type (regular, curses, both)
-P) 0                                                             # Choose: 0=optimize, 1=model, 2=imgblock, 3=subcomps
+P) 2                                                             # Choose: 0=optimize, 1=model, 2=imgblock, 3=subcomps
 
 # INITIAL FITTING PARAMETERS
 #

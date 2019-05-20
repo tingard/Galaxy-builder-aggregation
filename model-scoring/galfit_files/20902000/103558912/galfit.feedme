@@ -1,14 +1,14 @@
 
 ===============================================================================
 # IMAGE and GALFIT CONTROL PARAMETERS
-A) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902040/image_cutout.fits                                                   # Input data image (FITS file)
-B) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902040/output-annotation-0.fits                                                  # Output data image block
-C) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902040/sigma.fits                                                  # Sigma image name (made from data if blank or "none")
-D) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902040/PSF.fits                                                     # Input PSF image and (optional) diffusion kernel
+A) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902000/103558912/image_cutout.fits                                                   # Input data image (FITS file)
+B) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902000/103558912/imgblock.fits                                                  # Output data image block
+C) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902000/103558912/sigma.fits                                                  # Sigma image name (made from data if blank or "none")
+D) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902000/103558912/PSF.fits                                                     # Input PSF image and (optional) diffusion kernel
 E) 1                                            # PSF fine sampling factor relative to data
-F) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902040/bad_pixel_image.fits                                               # Bad pixel mask (FITS image or ASCII coord list)
+F) /Users/tlingard/PhD/galaxy-builder/data-aggregation/model-scoring/galfit_files/20902000/103558912/bad_pixel_image.fits                                               # Bad pixel mask (FITS image or ASCII coord list)
 G) none                                        # File with parameter constraints (ASCII file)
-H) 1    240   1    258   # Image region to fit (xmin xmax ymin ymax)
+H) 1    180   1    180   # Image region to fit (xmin xmax ymin ymax)
 I) 100    100             # Size of the convolution box (x y)
 J) 26.563                                                # Magnitude photometric zeropoint
 K) 0.396  0.396                              # Plate scale (dx dy)    [arcsec per pixel]
@@ -32,27 +32,29 @@ P) 0                                                             # Choose: 0=opt
 
 
 0) sersic                         #  object type
-1) 110.42001715565925  130.8496729940041  0 0  #  position x, y
-3) 20.0  1     #  Integrated magnitude
-4) 110.46771710744584       0          #  R_e (half-light radius)   [pix]
+1) 90.17578125  89.28515911102295  0 0  #  position x, y
+3) 10.0  1     #  Integrated magnitude
+4) 41.89259110455124       1          #  R_e (half-light radius)   [pix]
 5) 1          0             #  Sersic index n (de Vaucouleurs n=4)
 6) 0.0000      0                  #     -----
 7) 0.0000      0                  #     -----
 8) 0.0000      0                  #     -----
-9) 1.698565965656227    0       #  axis ratio (b/a)
-10) -70.8209919741893      0          #  position angle (PA) [deg: Up=0, Left=90]
+9) 0.5331736088579678    1       #  axis ratio (b/a)
+10) 51.952957468173906      1          #  position angle (PA) [deg: Up=0, Left=90]
+
 Z) 0                              #  output option (0 = resid., 1 = Don't subtract)
 
 0) sersic                         #  object type
-1) 110.02797911153539  127.8265334589326  0 0  #  position x, y
-3) 20.0  1     #  Integrated magnitude
-4) 11.635482288917082       0          #  R_e (half-light radius)   [pix]
-5) 0.78          0             #  Sersic index n (de Vaucouleurs n=4)
+1) 89.82421875  89.28515911102295  0 0  #  position x, y
+3) 10.0  1     #  Integrated magnitude
+4) 3.8906454724611974       1          #  R_e (half-light radius)   [pix]
+5) 0.68          1             #  Sersic index n (de Vaucouleurs n=4)
 6) 0.0000      0                  #     -----
 7) 0.0000      0                  #     -----
 8) 0.0000      0                  #     -----
-9) 1.9369367924460092    0       #  axis ratio (b/a)
-10) -59.03624346792648      0          #  position angle (PA) [deg: Up=0, Left=90]
+9) 0.542765690325572    1       #  axis ratio (b/a)
+10) 73.30075576600638      1          #  position angle (PA) [deg: Up=0, Left=90]
+
 Z) 0                              #  output option (0 = resid., 1 = Don't subtract)
 
 

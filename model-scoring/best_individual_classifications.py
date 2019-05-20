@@ -195,7 +195,6 @@ def get_best_classification(subject_id, should_plot=False, should_save=False):
 if __name__ == '__main__':
     with open('lib/best-classifications.json') as f:
         d = json.load(f)
-    done = d.keys()
     to_iter = np.sort(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
     bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
     d = {}

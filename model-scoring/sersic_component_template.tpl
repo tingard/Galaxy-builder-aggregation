@@ -1,4 +1,4 @@
-0) sersic                         #  object type
+0) sersic2                         #  object type
 1) $mux  $muy  $fit_mux $fit_muy  #  position x, y
 3) $magnitude  $fit_magnitude     #  Integrated magnitude
 4) $rEff       $fit_rEff          #  R_e (half-light radius)   [pix]

@@ -55,7 +55,7 @@ def parse_bar_comp(comp, **kwargs):
     return parse_sersic_comp(_comp, **kwargs)
 
 
-def parse_spiral_comp(comp, size_diff=1):
+def parse_spiral_comp(comp, size_diff=1, image_size=256):
     out = []
     for arm in comp['value'][0]['value']:
         points = np.array([[p['x'], p['y']] for p in arm['points']], dtype='float')
