@@ -1,5 +1,6 @@
 import numpy as np
 from copy import deepcopy
+from scipy.interpolate import splprep, splev
 
 
 def hasDrawnComp(comp):
@@ -97,3 +98,23 @@ def make_json(parsed_annotation):
         for s in parsed_annotation['spiral']
     ]
     return a
+
+
+def _downsample(points):
+    tck, _ = splprep(np.array(points).T, s=0)
+    new_u = np.linspace(0, 1, 50)
+    return np.array(splev(new_u, tck)).T
+
+
+def parse_aggregate_model(a_m, size_diff=1.0):
+    BASE_SPIRAL_PARAMS = {'i0': 0.1, 'spread': 1, 'falloff': 1}
+    model = {}
+    for c in ('disk', 'bulge', 'bar'):
+        model[c] = a_m.get(c, None)
+        model[c]['mu'] = np.array(model[c]['mu']) * size_diff
+        model[c]['rEff'] *= size_diff
+    model['spiral'] = [
+      [np.array(_downsample(points))*size_diff, BASE_SPIRAL_PARAMS]
+      for points in a_m.get('spirals', [])
+    ]
+    return model
