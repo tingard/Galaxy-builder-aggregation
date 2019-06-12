@@ -30,11 +30,11 @@ def get_path(s):
 df_nsa = pd.read_pickle(get_path('df_nsa.pkl'))
 
 classifications = pd.read_csv(
-    get_path('../classifications/galaxy-builder-classifications_11-2-19.csv')
+    get_path('../classifications/galaxy-builder-classifications_12-6-19.csv')
 )
 
 subjects = pd.read_csv(
-    get_path('../classifications/galaxy-builder-subjects_24-1-19.csv')
+    get_path('../classifications/galaxy-builder-subjects_12-6-19.csv')
 )
 
 try:

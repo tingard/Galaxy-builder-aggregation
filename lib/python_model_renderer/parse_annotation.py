@@ -111,8 +111,9 @@ def parse_aggregate_model(a_m, size_diff=1.0):
     model = {}
     for c in ('disk', 'bulge', 'bar'):
         model[c] = a_m.get(c, None)
-        model[c]['mu'] = np.array(model[c]['mu']) * size_diff
-        model[c]['rEff'] *= size_diff
+        if model[c] is not None:
+            model[c]['mu'] = np.array(model[c]['mu']) * size_diff
+            model[c]['rEff'] *= size_diff
     model['spiral'] = [
       [np.array(_downsample(points))*size_diff, BASE_SPIRAL_PARAMS]
       for points in a_m.get('spirals', [])

@@ -1,10 +1,9 @@
 import numpy as np
 import pandas as pd
-from copy import copy, deepcopy
+from copy import deepcopy
 from scipy.optimize import minimize
 from sklearn.metrics import mean_squared_error
 import lib.python_model_renderer.render_galaxy as rg
-from progress.spinner import Spinner
 
 
 def get_params(n_arms):
@@ -29,6 +28,16 @@ FIT_PARAMS = {
     'spiral': ('i0', 'spread', 'falloff'),
 }
 
+PARAM_BOUNDS = {
+    'i0': (0, 50),
+    'rEff': (0, 1E4),
+    'axRatio': (0, 1),
+    'n': (1E-2, 1E1),
+    'c': (1E-2, 1E1),
+    'spread': (0, 1E2),
+    'falloff': (0, 1E10),
+}
+
 class Model():
     def __init__(self, model, galaxy_data, psf=None, pixel_mask=None):
         self.base_model = deepcopy(model)
@@ -42,7 +51,7 @@ class Model():
         self.n_arms = len(model['spiral'])
         self.params = get_params(self.n_arms)
         self.comps = self.calculate_components(model)
-        self.p, self.__p_key = self.construct_p(model)
+        self.p, self.__p_key, self.__p_bounds = self.construct_p(model)
         self.change_map = np.array([i[0] for i in self.__p_key])
 
     def construct_p(self, model):
@@ -66,7 +75,17 @@ class Model():
             for i in range(len(model['spiral']))
             for k in FIT_PARAMS['spiral']
         ]
-        return p, p_key
+        p_bounds = np.array([
+            PARAM_BOUNDS[k]
+            for comp in ('disk', 'bulge', 'bar')
+            for k in FIT_PARAMS[comp]
+            if model[comp] is not None
+        ] + [
+            PARAM_BOUNDS[k]
+            for i in range(len(model['spiral']))
+            for k in FIT_PARAMS['spiral']
+        ])
+        return p, p_key, p_bounds
 
     def calculate_components(self, model, oversample_n=5):
         disk_arr = self.render_component('disk', model, oversample_n)
@@ -144,11 +163,14 @@ class ModelFitter():
         Y = rg.convolve2d(
             rendered_model, self.model.psf, mode='same', boundary='symm'
         ) * pixel_mask
-        return mean_squared_error(Y.flatten(), 0.8 * (self.model.data * pixel_mask).flatten())
+        return mean_squared_error(
+            Y.flatten(),
+            0.8 * (self.model.data * pixel_mask).flatten()
+        )
 
     def fit(self, oversample_n=5, *args, **kwargs):
         md = deepcopy(self.model.base_model)
-        p0, p_key = self.model.construct_p(md)
+        p0, p_key, bounds = self.model.construct_p(md)
         # p0 = np.array([
         #     md[comp][k]
         #     for comp in ('disk', 'bulge', 'bar')
@@ -163,7 +185,7 @@ class ModelFitter():
             return self.loss(self.model.render_from_p(p))
 
         # return _f, p0
-        res = minimize(_f, p0, *args, **kwargs)
+        res = minimize(_f, p0, bounds=bounds, *args, **kwargs)
         return self.model.update_model(
             md, res['x']
         ), res
