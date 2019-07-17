@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import lib.galaxy_utilities as gu
 import lib.average_shape_helpers as ash
 from gzbuilderspirals.oo import Pipeline, Arm
-from progress.bar import Bar
+from tqdm import tqdm
 import argparse
 import warnings
 from astropy.utils.exceptions import AstropyWarning
@@ -40,8 +40,7 @@ if not SHOULD_RECALCULATE:
 else:
     df = []
     msg = 'Obtaining original & validation models'
-    bar = Bar(msg, max=len(dr8ids), suffix='%(percent).1f%% - %(eta)ds')
-    for i in range(len(dr8ids)):
+    for i in tqdm(len(dr8ids)):
         res = {
             'original_id': ss_ids[i],
             'validation_id': validation_ids[i],
@@ -158,8 +157,6 @@ else:
             )
         )
         df.append(res)
-        bar.next()
-    bar.finish()
 
     df = pd.DataFrame(df).set_index('original_id')
     df.to_pickle('duplicate-components.pkl')
@@ -200,8 +197,7 @@ else:
     print('Calculaing pitch angles for combined classifications')
     pa_df = {'pa': [], 'sigma_pa': []}
     msg = 'Obtaining combined spirals'
-    bar = Bar(msg, max=len(dr8ids), suffix='%(percent).1f%% - %(eta)ds')
-    for i in range(len(dr8ids)):
+    for i in tqdm(len(dr8ids)):
         original_id = ss_ids[i]
         validation_id = validation_ids[i]
         gal, angle = gu.get_galaxy_and_angle(original_id)
@@ -249,8 +245,6 @@ else:
         pa_df['pa'].append(pa)
         pa_df['sigma_pa'].append(sigma_pa)
 
-        bar.next()
-    bar.finish()
     pa_df = pd.DataFrame(
         pa_df,
         index=ss_ids,

@@ -1,5 +1,6 @@
 lib/NSA_GalaxyZoo.fits
 lib/df_nsa.pkl
+lib/gz2_hart16.csv
 spiral-aggregation/fitsImages
 spiral-aggregation/montageOutputs
 spiral-aggregation/sparcfire-fits/

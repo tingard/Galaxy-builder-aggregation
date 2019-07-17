@@ -12,7 +12,7 @@ import wrangle_classifications as wc
 import lib.galaxy_utilities as gu
 import lib.python_model_renderer.parse_annotation as pa
 import lib.average_shape_helpers as ash
-from progress.bar import Bar
+from tqdm import tqdm
 import warnings
 from astropy.utils.exceptions import AstropyWarning
 warnings.simplefilter('ignore', category=AstropyWarning)
@@ -434,11 +434,7 @@ def make_dataframe():
 if __name__ == '__main__':
     sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
     to_iter = sid_list
-    bar = Bar('Calculating models', max=len(to_iter),
-              suffix='%(percent).1f%% - %(eta)ds')
-    for subject_id in to_iter:
+    for subject_id in tqdm(to_iter):
         model, cluster_masks, arms = make_model(subject_id)
         plot_aggregation(subject_id, model, cluster_masks, arms)
-        bar.next()
-    bar.finish()
     make_dataframe()

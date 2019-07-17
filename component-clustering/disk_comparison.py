@@ -71,7 +71,7 @@ def get_gzb_axis_ratios():
             ry = disk.get('ry', np.nan)
             axRatio = min(rx, ry) / max(rx, ry)
         if axRatio > 0.95:
-            print(sid);
+            print(sid)
         axr.append(axRatio)
     return pd.Series(data=axr, index=sid_list, name='GZB disk axis ratio')
 

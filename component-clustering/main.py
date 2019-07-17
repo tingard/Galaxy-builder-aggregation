@@ -13,7 +13,7 @@ import wrangle_classifications as wc
 import warnings
 from astropy.utils.exceptions import AstropyWarning
 warnings.simplefilter('ignore', category=AstropyWarning)
-from progress.bar import Bar
+from tqdm import tqdm
 
 
 DISK_EPS = 0.3
@@ -279,8 +279,7 @@ def plot_component(pic_array, patches, outfile=None):
 if __name__ == "__main__":
     sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
     to_iter = sid_list
-    progress_bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
-    for subject_id in to_iter:
+    for subject_id in tqdm(to_iter):
         gal, angle = gu.get_galaxy_and_angle(subject_id)
         pic_array, deprojected_image = gu.get_image(gal, subject_id, angle)
         pix_size = pic_array.shape[0] / (gal['PETRO_THETA'].iloc[0] * 4)  # pixels per arcsecond
@@ -388,5 +387,3 @@ if __name__ == "__main__":
         outfile = 'clustered-components-images/{}.png'.format(subject_id)
         plt.savefig(outfile)
         plt.close()
-        progress_bar.next()
-    progress_bar.finish()

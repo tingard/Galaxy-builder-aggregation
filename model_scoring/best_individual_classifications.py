@@ -11,7 +11,7 @@ from shapely.affinity import rotate as shapely_rotate
 from shapely.affinity import scale as shapely_scale
 from shapely.affinity import translate as shapely_translate
 from descartes import PolygonPatch
-from progress.bar import Bar
+from tqdm import tqdm
 import warnings
 from astropy.utils.exceptions import AstropyWarning
 warnings.simplefilter('ignore', category=AstropyWarning)
@@ -196,17 +196,14 @@ if __name__ == '__main__':
     with open('lib/best-classifications.json') as f:
         d = json.load(f)
     to_iter = np.sort(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
-    bar = Bar('Calculating models', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
     d = {}
     try:
-        for subject_id in to_iter:
+        for subject_id in tqdm(to_iter):
             # if subject_id in d.keys():
             #     continue
             c = get_best_classification(subject_id, should_plot=True,
                                         should_save=True)
             d[str(subject_id)] = int(c.classification_id)
-            bar.next()
     except KeyboardInterrupt:
         with open('lib/best-classifications.json', 'w') as f:
             f.write(json.dumps(d, indent=1))
-    bar.finish()

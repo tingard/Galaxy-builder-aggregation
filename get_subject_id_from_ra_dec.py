@@ -3,7 +3,7 @@ import numpy as np
 import warnings
 import pandas as pd
 import lib.galaxy_utilities as gu
-from progress.bar import Bar
+from tqdm import tqdm
 from astropy.utils.exceptions import AstropyWarning
 from astropy.coordinates import SkyCoord
 import astropy.units as u
@@ -17,14 +17,9 @@ def make_map():
     sid_list = sorted(np.loadtxt('lib/subject-id-list.csv', dtype='u8'))
     to_iter = sid_list[:]
     coords = []
-    bar = Bar('Getting coordinates', max=len(to_iter),
-              suffix='%(percent).1f%% - %(eta)ds')
-    for subject_id in to_iter:
-        bar.next()
+    for subject_id in tqdm(to_iter):
         gal, angle = gu.get_galaxy_and_angle(subject_id)
         coords.append((subject_id, gal['RA'].iloc[0], gal['DEC'].iloc[0]))
-
-    bar.finish()
 
     df = pd.DataFrame(coords, columns=('subject_id', 'Ra', 'Dec'))
 

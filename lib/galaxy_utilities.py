@@ -1,13 +1,11 @@
 import os
-import re
 from tempfile import NamedTemporaryFile
 import numpy as np
 import pandas as pd
 import json
 import requests
-import subprocess
 from PIL import Image
-from skimage.transform import rotate, rescale
+from astropy.wcs import WCS
 from gzbuilderspirals import get_drawn_arms as __get_drawn_arms
 from gzbuilderspirals import deprojecting as dpj
 from shapely.geometry import box, Point
@@ -27,6 +25,7 @@ def get_path(s):
         s
     )
 
+
 df_nsa = pd.read_pickle(get_path('df_nsa.pkl'))
 
 classifications = pd.read_csv(
@@ -35,7 +34,7 @@ classifications = pd.read_csv(
 
 subjects = pd.read_csv(
     get_path('../classifications/galaxy-builder-subjects_12-6-19.csv')
-)
+).drop_duplicates(subset='subject_id').set_index('subject_id', drop=False)
 
 try:
     subject_images = pd.read_pickle(get_path('subject_images.pkl'))
@@ -59,7 +58,7 @@ meta_map = {i: j for i, j in zip(subjects['subject_id'].values, metadata)}
 
 def get_fits_location(gal):
     montagesDistanceMask = np.add.reduce(
-        (montageCoordinates - [gal['RA'].iloc[0], gal['DEC'].iloc[0]])**2,
+        (montageCoordinates - [gal['RA'], gal['DEC']])**2,
         axis=1
     ) < 0.01
     if np.any(montagesDistanceMask):
@@ -73,7 +72,9 @@ def get_fits_location(gal):
             'mosaic.fits'
         ))
     else:
-        fileTemplate = get_path('fitsImages/{0}/{1}/frame-r-{0:06d}-{1}-{2:04d}.fits')
+        fileTemplate = get_path(
+            'fitsImages/{0}/{1}/frame-r-{0:06d}-{1}-{2:04d}.fits'
+        )
         fits_name = fileTemplate.format(
             int(gal['RUN']),
             int(gal['CAMCOL']),
@@ -82,18 +83,44 @@ def get_fits_location(gal):
     return fits_name
 
 
-def get_galaxy_and_angle(id, imShape=(512, 512)):
-    subjectId = id
+def get_angle(gal, fits_name, image_size=np.array([512, 512])):
+    wFits = WCS(fits_name)
+    # edit to center on the galaxy
+    wFits.wcs.crval = [float(gal['RA']), float(gal['DEC'])]
+    wFits.wcs.crpix = image_size
 
+    r = 4 * float(gal['PETRO_THETA']) / 3600
+    phi = float(gal['PETRO_PHI90'])
+
+    center_pix, dec_line = np.array(wFits.all_world2pix(
+        [gal['RA'], gal['RA']],
+        [gal['DEC'], gal['DEC'] + r],
+        0
+    )).T
+
+    rot = [
+        [np.cos(np.deg2rad(phi)), -np.sin(np.deg2rad(phi))],
+        [np.sin(np.deg2rad(phi)), np.cos(np.deg2rad(phi))]
+    ]
+    vec = np.dot(rot, dec_line - center_pix)
+    rotation_angle = 90 - np.rad2deg(np.arctan2(vec[1], vec[0])) - 90
+    return rotation_angle
+
+
+def get_galaxy_and_angle(subject_id, imShape=(512, 512)):
     # Grab the metadata of the subject we are working on
-    meta = eval(
-        subjects[subjects['subject_id'] == subjectId].iloc[0]['metadata']
-    )
-
+    subject = subjects.loc[subject_id]
     # And the NSA data for the galaxy (if it's a galaxy with NSA data,
     # otherwise throw an error)
     try:
-        gal = df_nsa[df_nsa['NSAID'] == int(meta['NSA id'])]
+        gal = df_nsa.drop_duplicates(
+            subset='NSAID'
+        ).set_index(
+            'NSAID',
+            drop=False
+        ).loc[
+            int(json.loads(subject.metadata).get('NSA id', np.nan))
+        ]
     except KeyError:
         gal = {}
         raise KeyError(
@@ -107,12 +134,18 @@ def get_galaxy_and_angle(id, imShape=(512, 512)):
     # First, use a WCS object to obtain the rotation in pixel coordinates, as
     # would be obtained from `fitsFile[0].data`
     fits_name = get_fits_location(gal)
-    angle = dpj.get_angle(gal, fits_name, np.array(imShape)) % 180
+    angle = get_angle(gal, fits_name, np.array(imShape)) % 180
     return gal, angle
 
 
 def get_drawn_arms(subject_id, classifications=classifications):
-    return np.array(__get_drawn_arms(subject_id, classifications))
+    try:
+        qs = ' or '.join('subject_ids == {}'.format(i) for i in subject_id)
+    except TypeError:
+        qs = 'subject_ids == {}'.format(subject_id)
+    return __get_drawn_arms(
+        classifications.query(qs)
+    )
 
 
 def get_ds9_region(gal, fits_name):
@@ -139,102 +172,103 @@ select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1
         )).format(
             fits_name,
             get_path('regions/{}.reg'.format(id)),
-            gal['RA'].iloc[0],
-            gal['DEC'].iloc[0],
-            gal['PETRO_THETA'].iloc[0] * 2 / 3600,
+            gal['RA'],
+            gal['DEC'],
+            gal['PETRO_THETA'] * 2 / 3600,
         ),
     )
 
 
-def getUrl(id):
-    return eval(
-        subjects[subjects['subject_id'] == id]['locations'].iloc[0]
-    )['1']
-
-
-def get_image(gal, id, angle):
-    # We'll now download the Zooniverse image that volunteers actually
-    # classified on
-    if not os.path.isfile(get_path('images/{}.png'.format(id))):
-        url = getUrl(id)
-        imgData = requests.get(url).content
-
-        f = NamedTemporaryFile(
-            suffix='.{}'.format(url.split('.')[-1]),
-            delete=False
-        )
-        f.write(imgData)
-        f.close()
-        pic = Image.open(f.name)
-        os.unlink(f.name)
-        pic.save(get_path('images/{}.png'.format(id)))
-    else:
-        pic = Image.open(get_path('images/{}.png'.format(id)))
-    # Grab the data arrays from the Image objects, and imshow the images (for
-    # debugging purposes)
-    picArray = np.array(pic)
-
-    # Now deproject the image of the galaxy:
-    deprojectedImage = dpj.deproject_array(picArray, angle, gal['PETRO_BA90'].iloc[0])
-    return picArray, deprojectedImage
-
-
-def save_images():
-    df_subjects = subjects.set_index('subject_id')
-    urls = df_subjects.locations.apply(eval).apply(lambda v: dict.get(v, '1', None)).dropna()
-
-    def get_zoo_image(url):
-        if url.split('.')[-1].lower() not in ('png', 'jpeg', 'jpg'):
-            return None
-        imgData = requests.get(url).content
-        f = NamedTemporaryFile(
-            suffix='.{}'.format(url.split('.')[-1]),
-            delete=False
-        )
-        f.write(imgData)
-        f.close()
-        pic = Image.open(f.name)
-        os.unlink(f.name)
-        return pic
-
-    for id, url in urls.items():
-        pic = get_zoo_image(url)
-        if pic is not None:
-            pic.save(get_path('images/{}.png'.format(id)))
+# def getUrl(id):
+#     return eval(
+#         subjects[subjects['subject_id'] == id]['locations']
+#     )['1']
+#
+#
+# def get_image(gal, id, angle):
+#     # We'll now download the Zooniverse image that volunteers actually
+#     # classified on
+#     if not os.path.isfile(get_path('images/{}.png'.format(id))):
+#         url = getUrl(id)
+#         imgData = requests.get(url).content
+#
+#         f = NamedTemporaryFile(
+#             suffix='.{}'.format(url.split('.')[-1]),
+#             delete=False
+#         )
+#         f.write(imgData)
+#         f.close()
+#         pic = Image.open(f.name)
+#         os.unlink(f.name)
+#         pic.save(get_path('images/{}.png'.format(id)))
+#     else:
+#         pic = Image.open(get_path('images/{}.png'.format(id)))
+#     # Grab the data arrays from the Image objects, and imshow the images (for
+#     # debugging purposes)
+#     picArray = np.array(pic)
+#
+#     # Now deproject the image of the galaxy:
+#     deprojectedImage = dpj.deproject_array(
+#         picArray, angle, gal['PETRO_BA90']
+#     )
+#     return picArray, deprojectedImage
+#
+#
+# def save_images():
+#     df_subjects = subjects.set_index('subject_id')
+#     urls = df_subjects.locations.apply(eval).apply(lambda v: dict.get(v, '1', None)).dropna()
+#
+#     def get_zoo_image(url):
+#         if url.split('.')[-1].lower() not in ('png', 'jpeg', 'jpg'):
+#             return None
+#         imgData = requests.get(url).content
+#         f = NamedTemporaryFile(
+#             suffix='.{}'.format(url.split('.')[-1]),
+#             delete=False
+#         )
+#         f.write(imgData)
+#         f.close()
+#         pic = Image.open(f.name)
+#         os.unlink(f.name)
+#         return pic
+#
+#     for id, url in urls.items():
+#         pic = get_zoo_image(url)
+#         if pic is not None:
+#             pic.save(get_path('images/{}.png'.format(id)))
 
 
 def get_image_data(subject_id):
-    with open(get_path('location-map.json')) as location_map_file:
-        location_map = json.load(location_map_file)
-    location = location_map[str(subject_id)]
-    subject_set = os.path.expanduser(
-        '~/PhD/galaxy-builder/subjectUpload/subject_set_{}'.format(
-            location[0]
-        )
+    return get_diff_data(subject_id)
+
+
+def get_image(subject_id):
+    image_path = 'subject_data/{}/image.png'.format(subject_id)
+    return Image.open(get_path(image_path))
+
+
+def get_deprojected_image(subject_id, ba, angle):
+    return dpj.deproject_array(
+        np.array(get_image(subject_id)),
+        angle, ba,
     )
-    difference_fname = os.path.expanduser(
-        '{}/difference_subject{}.json'.format(subject_set, location[1])
-    )
-    with open(difference_fname) as difference_file:
-        difference = json.load(difference_file)
-    return difference
+
+
+def get_diff_data(subject_id):
+    diff_path = 'subject_data/{}/diff.json'.format(subject_id)
+    with open(get_path(diff_path)) as f:
+        diff = json.load(f)
+    return {
+        **diff,
+        **{k: np.array(diff[k], 'f8') for k in ('psf', 'imageData')},
+    }
 
 
 def get_psf(subject_id):
-    with open(get_path('location-map.json')) as location_map_file:
-        location_map = json.load(location_map_file)
-    location = location_map[str(subject_id)]
-    subject_set = os.path.expanduser(
-        '~/PhD/galaxy-builder/subjectUpload/subject_set_{}'.format(
-            location[0]
-        )
-    )
-    difference_fname = os.path.expanduser(
-        '{}/difference_subject{}.json'.format(subject_set, location[1])
-    )
-    with open(difference_fname) as difference_file:
-        difference = json.load(difference_file)
-    return np.array(difference['psf'], 'f8').reshape(11, 11)
+    model_path = 'subject_data/{}/model.json'.format(subject_id)
+    with open(get_path(model_path)) as f:
+        model = json.load(f)
+    return np.array(model['psf'], 'f8')
 
 
 def get_distances(subject_id):

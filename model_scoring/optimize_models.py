@@ -8,12 +8,12 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 import matplotlib.pyplot as plt
 from multiprocessing import Pool
-from progress.bar import Bar
+from tqdm import tqdm
 import argparse
 import lib.galaxy_utilities as gu
-import lib.python_model_renderer.render_galaxy as rg
+# import lib.python_model_renderer.render_galaxy as rg
 import lib.python_model_renderer.parse_annotation as pa
-from best_individual_classifications import get_best_classification
+# from best_individual_classifications import get_best_classification
 from model_fitting import Model, ModelFitter
 
 import warnings
@@ -37,10 +37,10 @@ SHOULD_RECALCULATE = (
     or not os.path.isfile('sandor-comparisons.pickle')
 )
 
-# only use if you won't interrupt mid-process, as interrupting will cause problems
 SHOULD_MULTIPROCESS = args.parallel
 
-# one of "best" or "agg", depending on whether to use best individual classifications, or aggregate ones
+# one of "best" or "agg", depending on whether to use best individual
+# classifications, or aggregate ones
 MODE = 'agg'
 
 with open('lib/best-classifications.json') as f:
@@ -130,27 +130,22 @@ def get_optimized_model(subject_id, mode='best'):
     m1_nosp = Model(new_nosp_model, galaxy_data, psf, pixel_mask)
     return (subject_id, m0_nosp, m1_nosp, sd.iloc[idxmin_sep], pix_size2)
 
+
+def step(subject_id):
+    global bar
+    r = get_optimized_model(subject_id, mode=MODE)
+    bar.update(1)
+    return r
+
+
 if SHOULD_RECALCULATE:
     print('Recalculating optimized models, mode="{}"'.format(MODE))
-    bar = Bar('Recalculating', max=len(to_iter), suffix='%(percent).1f%% - %(eta)ds')
-    f = lambda m: get_optimized_model(m, mode=MODE)
+    bar = tqdm(total=len(to_iter))
     if SHOULD_MULTIPROCESS:
-        p = Pool(4)
-        try:
-            f = lambda m: get_optimized_model(m, mode=MODE)
-            out = p.map(f, to_iter, callback=bar.next)
-            bar.finish()
-        except KeyboardInterrupt as e:
-            p.terminate()
-            raise e
-        p.close()
+        with Pool(4) as p:
+            out = p.map(step, to_iter)
     else:
-        def step(subject_id):
-            r = f(subject_id)
-            bar.next()
-            return r
         out = [step(subject_id) for subject_id in to_iter]
-        bar.finish()
     out = [i for i in out if i is not None]
     sids = [i[0] for i in out]
     out2 = list(map(lambda o: make_dfs(o[2], o[3]), out))
